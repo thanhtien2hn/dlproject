@@ -308,6 +308,7 @@ function UATDashboard() {
 
       const url = `${backendUrl}/detect?mode=ocr&confidence=${confidenceThreshold}`;
       
+      
       const detectResponse = await fetch(url, {
         method: 'POST',
         body: formData,
