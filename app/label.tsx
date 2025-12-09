@@ -308,7 +308,7 @@ function UATDashboard() {
 
       const url = `${backendUrl}/detect?mode=ocr&confidence=${confidenceThreshold}`;
       
-      
+
       const detectResponse = await fetch(url, {
         method: 'POST',
         body: formData,
@@ -343,6 +343,7 @@ function UATDashboard() {
       }
     } catch (err) {
       console.error('Detection error:', err);
+      console.error('MFK:', err);
       setError(`Lỗi khi phát hiện: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsDetecting(false);
