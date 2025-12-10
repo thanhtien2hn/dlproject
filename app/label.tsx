@@ -717,10 +717,7 @@ function UATDashboard() {
                   checked={uatStatus === 'pass'}
                   onChange={() => setUatStatus('pass')}
                 />
-                <div className="p-2 rounded-md border border-gray-200 bg-white text-center peer-checked:border-green-500 peer-checked:bg-green-50 peer-checked:text-green-700 transition-all">
-                  <CheckCircle className="h-4 w-4 mx-auto mb-1" />
-                  <span className="text-xs font-bold">PASS</span>
-                </div>
+                
               </label>
               <label className="flex-1 cursor-pointer">
                 <input 
@@ -730,10 +727,7 @@ function UATDashboard() {
                   checked={uatStatus === 'fail'}
                   onChange={() => setUatStatus('fail')}
                 />
-                <div className="p-2 rounded-md border border-gray-200 bg-white text-center peer-checked:border-red-500 peer-checked:bg-red-50 peer-checked:text-red-700 transition-all">
-                  <XCircle className="h-4 w-4 mx-auto mb-1" />
-                  <span className="text-xs font-bold">FAIL</span>
-                </div>
+                
               </label>
             </div>
 
