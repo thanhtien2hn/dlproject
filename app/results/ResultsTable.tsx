@@ -445,14 +445,14 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
               <div className="text-2xl font-bold text-gray-800">{stats.total}</div>
               <div className="text-xs text-gray-500">Total results</div>
             </div>
-            <div className="bg-green-50 rounded-lg p-3 border border-green-100">
+            {/* <div className="bg-green-50 rounded-lg p-3 border border-green-100">
               <div className="text-2xl font-bold text-green-600">{stats.pass}</div>
               <div className="text-xs text-green-600">Pass</div>
-            </div>
-            <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+            </div> */}
+            {/* <div className="bg-red-50 rounded-lg p-3 border border-red-100">
               <div className="text-2xl font-bold text-red-600">{stats.fail}</div>
               <div className="text-xs text-red-600">Fail</div>
-            </div>
+            </div> */}
             <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
               <div className="text-2xl font-bold text-blue-600">{stats.totalDetections}</div>
               <div className="text-xs text-blue-600">Detections</div>
@@ -482,7 +482,7 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
               >
                 All
               </button>
-              <button
+              {/* <button
                 onClick={() => setFilterStatus('pass')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${
                   filterStatus === 'pass' 
@@ -491,7 +491,7 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                 }`}
               >
                 <CheckCircle className="w-3 h-3" /> Pass
-              </button>
+              </button> */}
               <button
                 onClick={() => setFilterStatus('fail')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${
@@ -537,9 +537,9 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <Sparkles className="w-4 h-4 mx-auto text-purple-500"/>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                {/* <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Status
-                </th>
+                </th> */}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Image
                 </th>
@@ -600,7 +600,7 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                           {result.uatStatus === 'pass' ? 1 : 0}
                         </span>
                       </td>
-                      <td className="px-4 py-4">
+                      {/* <td className="px-4 py-4">
                         {result.uatStatus === 'pass' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
                             <Check className="w-3 h-3" />
@@ -612,7 +612,7 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                             Fail
                           </span>
                         )}
-                      </td>
+                      </td> */}
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
                           {/* Thumbnail - Click to open popup */}
