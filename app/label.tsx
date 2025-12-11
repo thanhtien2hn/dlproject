@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { 
   Upload, Download, Save, Loader2, AlertCircle, 
   ScanText, CheckCircle, XCircle, AlertTriangle,
@@ -202,7 +201,7 @@ function UATDashboard() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
-  // Hàm xử lý file riêng biệt - FIX: Tách logic xử lý file ra
+  // Hàm xử lý file riêng biệt
   const processFile = useCallback((file: File) => {
     if (!file) return;
 
@@ -255,7 +254,6 @@ function UATDashboard() {
     reader.readAsDataURL(file);
   }, []);
 
-  // FIX: Sửa lại handleImageUpload
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -267,7 +265,6 @@ function UATDashboard() {
     }
   }, [processFile]);
 
-  // FIX: Sửa lại handleDrop
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -282,7 +279,6 @@ function UATDashboard() {
     e.stopPropagation();
   }, []);
 
-  // FIX: Click handler riêng cho drop zone
   const handleDropZoneClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -307,7 +303,6 @@ function UATDashboard() {
       formData.append('file', currentImageFile, currentImageFile.name);
 
       const url = `${backendUrl}/detect?mode=ocr&confidence=${confidenceThreshold}`;
-      
 
       const detectResponse = await fetch(url, {
         method: 'POST',
@@ -343,7 +338,6 @@ function UATDashboard() {
       }
     } catch (err) {
       console.error('Detection error:', err);
-      console.error('MFK:', err);
       setError(`Lỗi khi phát hiện: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsDetecting(false);
@@ -408,13 +402,12 @@ function UATDashboard() {
   // Handle image load event
   const handleImageLoad = useCallback(() => {
     setImageLoaded(true);
-    // Gọi drawCanvas sau khi image đã load
     setTimeout(() => {
       drawCanvas();
     }, 0);
   }, [drawCanvas]);
 
-  // NEW: Save annotation to file via API
+  // Save annotation to file via API
   const saveAnnotation = async () => {
     if (!currentImage || boxes.length === 0) {
       setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!' });
@@ -427,7 +420,7 @@ function UATDashboard() {
     try {
       const resultData = {
         imageName,
-        imageData: currentImage, // Lưu base64 image data
+        imageData: currentImage,
         imageSize: { width: imageNaturalSize.width, height: imageNaturalSize.height },
         detections: boxes.map(b => ({
           class_id: b.class_id,
@@ -456,7 +449,6 @@ function UATDashboard() {
         });
         setSavedResultsCount(result.totalResults);
         
-        // Also save to local state
         const annotation: LabeledImage = {
           imageUrl: currentImage,
           imageName: imageName,
@@ -467,7 +459,6 @@ function UATDashboard() {
         };
         setLabeledImages([...labeledImages, annotation]);
       } else if (response.status === 409 && result.error === 'duplicate') {
-        // Xử lý lỗi trùng tên file
         setSaveMessage({ 
           type: 'error', 
           text: result.message || `Ảnh "${imageName}" đã được lưu trước đó!`
@@ -559,24 +550,16 @@ function UATDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {/* Saved Results Counter - Clickable */}
-          <Link 
-            href="/results"
-            className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
-          >
+          <div className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
             <FileJson className="w-4 h-4 text-blue-600" />
             <span className="text-sm font-medium text-blue-700">
               {savedResultsCount} Saved results
             </span>
-          </Link>
-          {/* View Results Button */}
-          <Link
-            href="/results"
-            className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
+          </div>
+          <button className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
             <List className="w-4 h-4 text-gray-600" />
             <span className="text-sm font-medium text-gray-700">List</span>
-          </Link>
+          </button>
         </div>
       </header>
 
@@ -588,7 +571,6 @@ function UATDashboard() {
           <div className="p-5 border-b border-gray-100">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">1. Data Test</h3>
 
-            {/* FIX: Tách input ra khỏi drop zone để tránh conflict */}
             <input 
               ref={fileInputRef}
               type="file" 
@@ -699,7 +681,7 @@ function UATDashboard() {
                   Processing...
                 </>
               ) : (
-                '🔍Detection'
+                '🔍 Detection'
               )}
             </button>
           </div>
@@ -717,7 +699,10 @@ function UATDashboard() {
                   checked={uatStatus === 'pass'}
                   onChange={() => setUatStatus('pass')}
                 />
-                
+                <div className="border-2 border-green-300 peer-checked:border-green-500 peer-checked:bg-green-500 bg-white rounded-lg p-3 text-center transition-all">
+                  <CheckCircle className="w-6 h-6 mx-auto mb-1 text-green-600 peer-checked:text-white" />
+                  <span className="text-xs font-semibold text-green-700 peer-checked:text-white">Pass</span>
+                </div>
               </label>
               <label className="flex-1 cursor-pointer">
                 <input 
@@ -727,7 +712,10 @@ function UATDashboard() {
                   checked={uatStatus === 'fail'}
                   onChange={() => setUatStatus('fail')}
                 />
-                
+                <div className="border-2 border-red-300 peer-checked:border-red-500 peer-checked:bg-red-500 bg-white rounded-lg p-3 text-center transition-all">
+                  <XCircle className="w-6 h-6 mx-auto mb-1 text-red-600 peer-checked:text-white" />
+                  <span className="text-xs font-semibold text-red-700 peer-checked:text-white">Fail</span>
+                </div>
               </label>
             </div>
 
@@ -764,7 +752,7 @@ function UATDashboard() {
               {isSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Saved
+                  Saving...
                 </>
               ) : (
                 <>
@@ -787,7 +775,7 @@ function UATDashboard() {
 
         {/* RIGHT AREA */}
         <section className="flex-1 bg-gray-100 p-4 overflow-auto flex gap-4">
-          {/* Image Preview Panel - TĂNG KÍCH THƯỚC */}
+          {/* Image Preview Panel - FULL WIDTH */}
           <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden min-w-0">
             <div className="border-b border-gray-100 px-4 py-3 flex justify-between items-center shrink-0">
               <h2 className="text-sm font-semibold text-gray-700">Visual Preview</h2>
@@ -805,8 +793,8 @@ function UATDashboard() {
               </div>
             </div>
 
-            {/* FIX: Tăng kích thước vùng hiển thị ảnh */}
-            <div className="flex-1 p-4 flex items-center justify-center bg-gray-50/50 overflow-auto relative min-h-0">
+            {/* Vùng hiển thị ảnh 100% width */}
+            <div className="flex-1 flex items-start justify-start bg-gray-50/50 overflow-auto relative min-h-0 p-0">
               {error && (
                 <div className="absolute top-4 left-4 right-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start z-10">
                   <AlertCircle className="w-4 h-4 mr-2 text-red-500 flex-shrink-0 mt-0.5" />
@@ -815,7 +803,7 @@ function UATDashboard() {
               )}
 
               {currentImage ? (
-                <div className="relative shadow-lg w-full h-full flex items-center justify-center">
+                <div className="relative w-full h-full">
                   <img
                     ref={imageRef}
                     src={currentImage}
@@ -826,19 +814,20 @@ function UATDashboard() {
                   <canvas 
                     ref={canvasRef} 
                     onClick={handleCanvasClick} 
-                    className="object-contain rounded border border-gray-300 cursor-pointer"
+                    className="border border-gray-300 cursor-pointer"
                     style={{ 
-                      maxWidth: '100%', 
-                      maxHeight: 'calc(100vh - 200px)',  // Tăng từ 350px xuống 200px
-                      width: 'auto',
-                      height: 'auto'
+                      width: '100%',
+                      height: 'auto',
+                      display: 'block'
                     }}
                   />
                 </div>
               ) : (
-                <div className="text-center p-8">
-                  <Upload className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 font-medium">Upload a photo to get started</p>
+                <div className="absolute inset-0 flex items-center justify-center text-center p-8">
+                  <div>
+                    <Upload className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-gray-500 font-medium">Upload a photo to get started</p>
+                  </div>
                 </div>
               )}
 
@@ -865,7 +854,7 @@ function UATDashboard() {
             </div>
           </div>
 
-          {/* Analysis Detail Panel - THU NHỎ */}
+          {/* Analysis Detail Panel */}
           <div className="w-64 flex flex-col gap-4 shrink-0">
             {/* Summary Card */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
@@ -962,7 +951,7 @@ export default function UATDashboardPage() {
 
   if (!isClient) {
     return (
-      <div className="bg-gray-50 h-screen flex items-center justifhttp://localhost:8000/detecty-center">
+      <div className="bg-gray-50 h-screen flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
           <p className="text-gray-600">Loading Dashboard...</p>
