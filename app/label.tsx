@@ -87,7 +87,7 @@ function UATDashboard() {
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
-  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
+  const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
   const [uatStatus, setUatStatus] = useState<'pass' | 'fail'>('pass');
@@ -499,7 +499,7 @@ function UATDashboard() {
 
   const exportJSON = () => {
     if (boxes.length === 0) {
-      alert('Chưa có dữ liệu để xuất!!!');
+      alert('Chưa có dữ liệu để xuất!!');
       return;
     }
 
