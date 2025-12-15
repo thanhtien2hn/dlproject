@@ -5,14 +5,15 @@ import {
   Upload, Download, Save, Loader2, AlertCircle, 
   ScanText, CheckCircle, XCircle, AlertTriangle,
   BarChart2, RefreshCw, UploadCloud, Trash2, FileJson, List,
-  ExternalLink
+  ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2
 } from 'lucide-react';
 
 interface Detection {
   class_id: number;
   class_name: string;
   confidence: number;
-  bbox: number[]; // [x, y, width, height]
+  bbox: number[];
+  page?: number;
 }
 
 interface BoundingBox extends Detection {
@@ -37,37 +38,33 @@ interface ModelInfo {
   class_names: string[];
 }
 
-interface SavedResult {
-  id: string;
-  imageName: string;
-  imageSize: { width: number; height: number };
-  detections: {
-    class_id: number;
-    class_name: string;
-    confidence: number;
-    bbox: number[];
-  }[];
-  uatStatus: 'pass' | 'fail';
-  uatNote: string;
-  timestamp: string;
+interface PDFPageImage {
+  pageNumber: number;
+  imageUrl: string;
+  width: number;
+  height: number;
 }
 
-// Fixed class colors matching the HTML design
 const CLASS_COLORS: { [key: string]: string } = {
-  'Text': '#a855f7',      // purple-500
-  'Title': '#22c55e',     // green-500
-  'Section header': '#ef4444', // red-500
-  'Picture': '#f97316',   // orange-500
-  'Table': '#eab308',     // yellow-500
-  'Signature': '#ec4899', // pink-500
-  'Logo': '#92400e',      // amber-800
+  'Text': '#a855f7',
+  'Title': '#22c55e',
+  'Section header': '#ef4444',
+  'Picture': '#f97316',
+  'Table': '#eab308',
+  'Signature': '#ec4899',
+  'Logo': '#92400e',
+  'Caption': '#06b6d4',
+  'Footnote': '#8b5cf6',
+  'Formula': '#f59e0b',
+  'List-item': '#10b981',
+  'Page-footer': '#ec4899',
+  'Page-header': '#3b82f6',
 };
 
 const getClassColor = (className: string): string => {
   return CLASS_COLORS[className] || '#6b7280';
 };
 
-// Generate unique ID
 let idCounter = 0;
 const generateId = () => {
   idCounter += 1;
@@ -75,7 +72,6 @@ const generateId = () => {
 };
 
 function UATDashboard() {
-  // State
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [currentImageFile, setCurrentImageFile] = useState<File | null>(null);
   const [imageName, setImageName] = useState<string>('');
@@ -87,6 +83,7 @@ function UATDashboard() {
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
+  // const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
   const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
@@ -94,20 +91,68 @@ function UATDashboard() {
   const [uatNote, setUatNote] = useState('');
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [fileSize, setFileSize] = useState<string>('');
-  const [sessionId] = useState(() => Math.floor(Math.random() * 1000));
-  
-  // New state for saved results
   const [isSaving, setIsSaving] = useState(false);
   const [savedResultsCount, setSavedResultsCount] = useState(0);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  
-  // State để track image đã load chưa
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [isPDF, setIsPDF] = useState(false);
+  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pdfPages, setPdfPages] = useState<PDFPageImage[]>([]);
+  const [isConvertingPDF, setIsConvertingPDF] = useState(false);
+  const [pdfJsLoaded, setPdfJsLoaded] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
-  // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load PDF.js
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.async = true;
+    script.onload = () => {
+      if (typeof window !== 'undefined' && (window as any).pdfjsLib) {
+        (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc = 
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        setPdfJsLoaded(true);
+        console.log('PDF.js loaded successfully');
+      }
+    };
+    script.onerror = () => {
+      console.error('Failed to load PDF.js');
+      setError('Không thể load PDF.js library');
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
+    };
+  }, []);
+
+  // Keyboard shortcuts for zoom
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          handleZoomIn();
+        } else if (e.key === '-') {
+          e.preventDefault();
+          handleZoomOut();
+        } else if (e.key === '0') {
+          e.preventDefault();
+          handleResetZoom();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [zoom]);
 
   useEffect(() => {
     checkBackendStatus();
@@ -116,39 +161,66 @@ function UATDashboard() {
     return () => clearInterval(interval);
   }, [backendUrl]);
 
-  // Sử dụng useCallback để đảm bảo drawCanvas được gọi đúng cách
   const drawCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    const image = imageRef.current;
-    if (!canvas || !image || !currentImage || !imageLoaded) return;
+    if (isPDF) {
+      const currentPageData = pdfPages.find(p => p.pageNumber === currentPage);
+      if (!currentPageData) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-    // Đảm bảo image đã load xong
-    if (image.naturalWidth === 0 || image.naturalHeight === 0) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    canvas.width = image.width;
-    canvas.height = image.height;
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    const scaleX = image.width / imageNaturalSize.width;
-    const scaleY = image.height / imageNaturalSize.height;
+        const scaleX = img.width / currentPageData.width;
+        const scaleY = img.height / currentPageData.height;
 
-    boxes.forEach((box) => {
-      drawBox(ctx, box, box.id === selectedBoxId, scaleX, scaleY);
-    });
-  }, [boxes, currentImage, selectedBoxId, imageNaturalSize, imageLoaded]);
+        const pageBoxes = boxes.filter(b => b.page === currentPage);
+        pageBoxes.forEach((box) => {
+          drawBox(ctx, box, box.id === selectedBoxId, scaleX, scaleY);
+        });
+      };
+      img.src = currentPageData.imageUrl;
+
+    } else {
+      const canvas = canvasRef.current;
+      const image = imageRef.current;
+      if (!canvas || !image || !currentImage || !imageLoaded) return;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      if (image.naturalWidth === 0 || image.naturalHeight === 0) return;
+
+      canvas.width = image.width;
+      canvas.height = image.height;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      const scaleX = image.width / imageNaturalSize.width;
+      const scaleY = image.height / imageNaturalSize.height;
+
+      boxes.forEach((box) => {
+        drawBox(ctx, box, box.id === selectedBoxId, scaleX, scaleY);
+      });
+    }
+  }, [boxes, currentImage, selectedBoxId, imageNaturalSize, imageLoaded, isPDF, pdfPages, currentPage]);
 
   useEffect(() => {
-    if (currentImage && imageLoaded) {
+    if (currentImage && (imageLoaded || (isPDF && pdfPages.length > 0))) {
       drawCanvas();
     }
-  }, [drawCanvas, currentImage, imageLoaded]);
+  }, [drawCanvas, currentImage, imageLoaded, isPDF, pdfPages]);
 
-  // Clear save message after 3 seconds
   useEffect(() => {
     if (saveMessage) {
       const timer = setTimeout(() => setSaveMessage(null), 3000);
@@ -183,7 +255,6 @@ function UATDashboard() {
     }
   };
 
-  // Fetch saved results count from file
   const fetchSavedResultsCount = async () => {
     try {
       const response = await fetch('/api/save-result');
@@ -202,65 +273,159 @@ function UATDashboard() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
-  // Hàm xử lý file riêng biệt
-  const processFile = useCallback((file: File) => {
+  const convertPDFToImages = async (file: File): Promise<PDFPageImage[]> => {
+    if (!pdfJsLoaded) {
+      throw new Error('PDF.js chưa được load. Vui lòng đợi...');
+    }
+
+    setIsConvertingPDF(true);
+    try {
+      const pdfjsLib = (window as any).pdfjsLib;
+      if (!pdfjsLib) {
+        throw new Error('PDF.js không khả dụng');
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      
+      console.log(`PDF loaded: ${pdf.numPages} pages`);
+      
+      const pages: PDFPageImage[] = [];
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        console.log(`Converting page ${i}/${pdf.numPages}...`);
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 2.0 });
+        
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('Cannot get canvas context');
+        }
+        
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+        
+        await page.render(renderContext).promise;
+        
+        const imageUrl = canvas.toDataURL('image/png');
+        
+        pages.push({
+          pageNumber: i,
+          imageUrl: imageUrl,
+          width: viewport.width,
+          height: viewport.height
+        });
+        
+        console.log(`Page ${i} converted successfully`);
+      }
+      
+      console.log(`All ${pages.length} pages converted`);
+      return pages;
+      
+    } catch (err) {
+      console.error('PDF conversion error:', err);
+      throw err;
+    } finally {
+      setIsConvertingPDF(false);
+    }
+  };
+
+  const processFile = useCallback(async (file: File) => {
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setError('Vui lòng chọn file ảnh (jpg, png, etc)');
+    const isImage = file.type.startsWith('image/');
+    const isPDFFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    
+    if (!isImage && !isPDFFile) {
+      setError('Vui lòng chọn file ảnh (jpg, png) hoặc PDF');
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File quá lớn! Tối đa 10MB.');
+    if (file.size > 20 * 1024 * 1024) {
+      setError('File quá lớn! Tối đa 20MB.');
       return;
     }
 
-    // Reset states trước khi load ảnh mới
     setImageLoaded(false);
     setCurrentImage(null);
     setBoxes([]);
     setError(null);
     setProcessingTime(null);
+    setIsPDF(isPDFFile);
+    setTotalPages(1);
+    setCurrentPage(1);
+    setPdfPages([]);
+    setZoom(1);
     
     setCurrentImageFile(file);
     setImageName(file.name);
     setFileSize(formatFileSize(file.size));
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (!result) {
-        setError('Không thể đọc file');
+    if (isPDFFile) {
+      if (!pdfJsLoaded) {
+        setError('Đang load PDF.js... Vui lòng đợi vài giây và thử lại.');
         return;
       }
-      
-      const img = new Image();
-      img.onload = () => {
-        setImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
-        setCurrentImage(result);
-        // Đặt timeout nhỏ để đảm bảo state đã update
-        setTimeout(() => {
+
+      try {
+        console.log('Starting PDF conversion...');
+        const pages = await convertPDFToImages(file);
+        console.log('PDF conversion completed:', pages.length, 'pages');
+        
+        setPdfPages(pages);
+        setTotalPages(pages.length);
+        setCurrentPage(1);
+        
+        if (pages.length > 0) {
+          setCurrentImage(pages[0].imageUrl);
+          setImageNaturalSize({ width: pages[0].width, height: pages[0].height });
           setImageLoaded(true);
-        }, 50);
+        }
+      } catch (err) {
+        console.error('PDF processing error:', err);
+        setError(`Không thể convert PDF: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        if (!result) {
+          setError('Không thể đọc file');
+          return;
+        }
+        
+        const img = new Image();
+        img.onload = () => {
+          setImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+          setCurrentImage(result);
+          setTimeout(() => {
+            setImageLoaded(true);
+          }, 50);
+        };
+        img.onerror = () => {
+          setError('Không thể load ảnh. File có thể bị lỗi.');
+        };
+        img.src = result;
       };
-      img.onerror = () => {
-        setError('Không thể load ảnh. File có thể bị lỗi.');
+      reader.onerror = () => {
+        setError('Lỗi khi đọc file');
       };
-      img.src = result;
-    };
-    reader.onerror = () => {
-      setError('Lỗi khi đọc file');
-    };
-    reader.readAsDataURL(file);
-  }, []);
+      reader.readAsDataURL(file);
+    }
+  }, [pdfJsLoaded]);
 
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       processFile(file);
     }
-    // Reset input để có thể upload lại cùng file
     if (e.target) {
       e.target.value = '';
     }
@@ -270,7 +435,7 @@ function UATDashboard() {
     e.preventDefault();
     e.stopPropagation();
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
+    if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
       processFile(file);
     }
   }, [processFile]);
@@ -303,7 +468,7 @@ function UATDashboard() {
       const formData = new FormData();
       formData.append('file', currentImageFile, currentImageFile.name);
 
-      const url = `${backendUrl}/detect?mode=ocr&confidence=${confidenceThreshold}`;
+      const url = `${backendUrl}/detect?confidence=${confidenceThreshold}&iou=${iouThreshold}`;
 
       const detectResponse = await fetch(url, {
         method: 'POST',
@@ -326,7 +491,32 @@ function UATDashboard() {
       const endTime = Date.now();
       setProcessingTime((endTime - startTime) / 1000);
 
-      const detections: BoundingBox[] = result.detections.map((det: Detection) => ({
+      let allDetections: Detection[] = [];
+      
+      if (result.file_type === 'pdf' && result.pages) {
+        setTotalPages(result.total_pages || 1);
+        result.pages.forEach((page: any) => {
+          if (page.detections && Array.isArray(page.detections)) {
+            allDetections = allDetections.concat(page.detections);
+          }
+        });
+        
+        if (result.pages.length > 0 && result.pages[0]) {
+          setImageNaturalSize({
+            width: result.pages[0].image_width || 595,
+            height: result.pages[0].image_height || 842
+          });
+        }
+      } else if (result.detections && Array.isArray(result.detections)) {
+        allDetections = result.detections;
+        setTotalPages(1);
+      } else {
+        console.warn('Unexpected response format:', result);
+        setError('Response format không đúng từ backend');
+        return;
+      }
+
+      const detections: BoundingBox[] = allDetections.map((det: Detection) => ({
         ...det,
         id: generateId(),
         color: getClassColor(det.class_name),
@@ -359,25 +549,20 @@ function UATDashboard() {
     const scaledWidth = width * scaleX;
     const scaledHeight = height * scaleY;
 
-    // Draw semi-transparent fill
-    ctx.fillStyle = box.color + '1A'; // 10% opacity
+    ctx.fillStyle = box.color + '1A';
     ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
     
-    // Draw border
     ctx.strokeStyle = box.color;
     ctx.lineWidth = isSelected ? 3 : 2;
     ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
 
-    // Draw label
     const labelText = `${box.class_name} ${box.confidence.toFixed(2)}`;
     ctx.font = 'bold 12px Arial';
     const textWidth = ctx.measureText(labelText).width;
 
-    // Label background
     ctx.fillStyle = box.color;
     ctx.fillRect(scaledX, scaledY, textWidth + 6, 18);
     
-    // Label text
     ctx.fillStyle = 'white';
     ctx.fillText(labelText, scaledX + 3, scaledY + 13);
   };
@@ -387,12 +572,18 @@ function UATDashboard() {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const scaleX = imageNaturalSize.width / canvas.width;
-    const scaleY = imageNaturalSize.height / canvas.height;
+    const currentPageData = isPDF ? pdfPages.find(p => p.pageNumber === currentPage) : null;
+    const refWidth = isPDF && currentPageData ? currentPageData.width : imageNaturalSize.width;
+    const refHeight = isPDF && currentPageData ? currentPageData.height : imageNaturalSize.height;
+    
+    const scaleX = refWidth / canvas.width;
+    const scaleY = refHeight / canvas.height;
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
-    const clickedBox = boxes.find((box) => {
+    const relevantBoxes = isPDF ? boxes.filter(b => b.page === currentPage) : boxes;
+    
+    const clickedBox = relevantBoxes.find((box) => {
       const [bx, by, bw, bh] = box.bbox;
       return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
     });
@@ -400,7 +591,6 @@ function UATDashboard() {
     setSelectedBoxId(clickedBox ? clickedBox.id : null);
   };
 
-  // Handle image load event
   const handleImageLoad = useCallback(() => {
     setImageLoaded(true);
     setTimeout(() => {
@@ -408,7 +598,40 @@ function UATDashboard() {
     }, 0);
   }, [drawCanvas]);
 
-  // Save annotation to file via API
+  const goToPreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+      const prevPage = pdfPages.find(p => p.pageNumber === currentPage - 1);
+      if (prevPage) {
+        setCurrentImage(prevPage.imageUrl);
+        setImageNaturalSize({ width: prevPage.width, height: prevPage.height });
+      }
+    }
+  };
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+      const nextPage = pdfPages.find(p => p.pageNumber === currentPage + 1);
+      if (nextPage) {
+        setCurrentImage(nextPage.imageUrl);
+        setImageNaturalSize({ width: nextPage.width, height: nextPage.height });
+      }
+    }
+  };
+
+  const handleZoomIn = () => {
+    setZoom(prev => Math.min(prev + 0.25, 3));
+  };
+
+  const handleZoomOut = () => {
+    setZoom(prev => Math.max(prev - 0.25, 0.25));
+  };
+
+  const handleResetZoom = () => {
+    setZoom(1);
+  };
+
   const saveAnnotation = async () => {
     if (!currentImage || boxes.length === 0) {
       setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!' });
@@ -421,16 +644,20 @@ function UATDashboard() {
     try {
       const resultData = {
         imageName,
-        imageData: currentImage,
+        imageData: isPDF ? pdfPages[0]?.imageUrl : currentImage,
         imageSize: { width: imageNaturalSize.width, height: imageNaturalSize.height },
         detections: boxes.map(b => ({
           class_id: b.class_id,
           class_name: b.class_name,
           confidence: b.confidence,
-          bbox: b.bbox
+          bbox: b.bbox,
+          page: b.page
         })),
         uatStatus,
         uatNote,
+        isPDF,
+        totalPages,
+        pdfPages: isPDF ? pdfPages.map(p => ({ pageNumber: p.pageNumber, imageUrl: p.imageUrl })) : undefined
       };
 
       const response = await fetch('/api/save-result', {
@@ -478,7 +705,6 @@ function UATDashboard() {
     }
   };
 
-  // Clear all saved results
   const clearAllResults = async () => {
     if (!confirm('Bạn có chắc muốn xóa tất cả kết quả đã lưu?')) return;
 
@@ -499,7 +725,7 @@ function UATDashboard() {
 
   const exportJSON = () => {
     if (boxes.length === 0) {
-      alert('Chưa có dữ liệu để xuất!!');
+      alert('Chưa có dữ liệu để xuất!');
       return;
     }
 
@@ -510,10 +736,13 @@ function UATDashboard() {
         class_id: b.class_id,
         class_name: b.class_name,
         confidence: b.confidence,
-        bbox: b.bbox
+        bbox: b.bbox,
+        page: b.page
       })),
       uatStatus,
       uatNote,
+      isPDF,
+      totalPages,
       timestamp: new Date().toISOString()
     };
 
@@ -534,12 +763,10 @@ function UATDashboard() {
     : '0.00';
 
   const lowConfidenceBoxes = boxes.filter(b => b.confidence < 0.5);
-
-  const legendClasses = ['Text', 'Title', 'Section header', 'Picture', 'Table', 'Signature', 'Logo'];
+  const currentPageBoxes = isPDF ? boxes.filter(b => b.page === currentPage) : boxes;
 
   return (
     <div className="bg-gray-50 h-screen flex flex-col" style={{ fontFamily: "'Inter', sans-serif" }}>
-      {/* HEADER */}
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 text-white p-2 rounded-lg">
@@ -547,11 +774,10 @@ function UATDashboard() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-800">Dashboard</h1>
-            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 2.1</p>
+            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 2.2</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {/* Saved Results Counter - Clickable */}
           <a 
             href="/results"
             rel="noopener noreferrer"
@@ -564,7 +790,6 @@ function UATDashboard() {
             <ExternalLink className="w-3 h-3 text-blue-500" />
           </a>
           
-          {/* View Results Button */}
           <a
             href="/results"
             rel="noopener noreferrer"
@@ -577,18 +802,15 @@ function UATDashboard() {
         </div>
       </header>
 
-      {/* MAIN CONTENT */}
       <main className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR */}
         <aside className="w-80 bg-white border-r border-gray-200 flex flex-col overflow-y-auto shrink-0">
-          {/* 1. Data Source */}
           <div className="p-5 border-b border-gray-100">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">1. Data Test</h3>
 
             <input 
               ref={fileInputRef}
               type="file" 
-              accept="image/*"
+              accept="image/*,application/pdf"
               onChange={handleImageUpload}
               className="hidden"
             />
@@ -601,29 +823,34 @@ function UATDashboard() {
             >
               <UploadCloud className="mx-auto h-6 w-6 text-gray-400 mb-1" />
               <p className="text-xs text-gray-500">
-                drag/ drop image or click
+                drag/drop image or PDF
               </p>
             </div>
+
+            {!pdfJsLoaded && (
+              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                ⏳ Đang load PDF.js...
+              </div>
+            )}
 
             {imageName && (
               <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded text-sm">
                 <p className="text-green-700 truncate font-medium">✓ {imageName}</p>
                 <p className="text-green-600 text-xs mt-1">
                   {imageNaturalSize.width} × {imageNaturalSize.height} px • {fileSize}
+                  {isPDF && <span className="ml-2 bg-red-100 text-red-700 px-1.5 rounded text-xs font-medium">PDF ({totalPages} pages)</span>}
                 </p>
               </div>
             )}
           </div>
 
-          {/* 2. Model Config */}
           <div className="p-5 border-b border-gray-100">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">2. Configuration Model</h3>
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">Model Version</label>
               <select className="w-full border-gray-300 border rounded-md py-2 px-3 text-sm bg-white shadow-sm">
-                <option>{modelInfo?.model_path || 'v2_best.pt'} (Current)</option>
-                <option>v1_prod.pt (Baseline)</option>
+                <option>{modelInfo?.model_path || 'best.pt'} (Current)</option>
               </select>
             </div>
 
@@ -659,7 +886,6 @@ function UATDashboard() {
               />
             </div>
 
-            {/* Backend Status */}
             <div className={`p-2 rounded border text-xs ${
               backendStatus === 'connected' 
                 ? 'bg-green-50 border-green-200 text-green-700' 
@@ -679,7 +905,6 @@ function UATDashboard() {
               </div>
             </div>
 
-            {/* Detect Button */}
             <button
               onClick={detectObjects}
               disabled={!currentImageFile || backendStatus !== 'connected' || isDetecting}
@@ -700,29 +925,10 @@ function UATDashboard() {
             </button>
           </div>
 
-          {/* 3. UAT Feedback */}
           <div className="p-5 bg-blue-50 flex-1">
             <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-4">3. Evaluate</h3>
 
             <div className="flex gap-3 mb-4">
-              <label className="flex-1 cursor-pointer">
-                <input 
-                  type="radio" 
-                  name="status" 
-                  className="peer sr-only" 
-                  checked={uatStatus === 'pass'}
-                  onChange={() => setUatStatus('pass')}
-                />
-              </label>
-              <label className="flex-1 cursor-pointer">
-                <input 
-                  type="radio" 
-                  name="status" 
-                  className="peer sr-only"
-                  checked={uatStatus === 'fail'}
-                  onChange={() => setUatStatus('fail')}
-                />
-              </label>
             </div>
 
             <div className="mb-4">
@@ -734,7 +940,6 @@ function UATDashboard() {
               />
             </div>
 
-            {/* Save Message */}
             {saveMessage && (
               <div className={`mb-3 p-2 rounded text-xs flex items-center gap-2 ${
                 saveMessage.type === 'success' 
@@ -767,7 +972,6 @@ function UATDashboard() {
               )}
             </button>
 
-            {/* Clear All Button */}
             {savedResultsCount > 0 && (
               <button 
                 onClick={clearAllResults}
@@ -779,13 +983,39 @@ function UATDashboard() {
           </div>
         </aside>
 
-        {/* RIGHT AREA */}
         <section className="flex-1 bg-gray-100 p-4 overflow-auto flex gap-4">
-          {/* Image Preview Panel - FULL WIDTH */}
           <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden min-w-0">
             <div className="border-b border-gray-100 px-4 py-3 flex justify-between items-center shrink-0">
               <h2 className="text-sm font-semibold text-gray-700">Visual Preview</h2>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={handleZoomOut}
+                    disabled={zoom <= 0.25}
+                    className="p-1.5 hover:bg-white rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    title="Zoom Out (Ctrl + -)"
+                  >
+                    <ZoomOut className="w-4 h-4 text-gray-600" />
+                  </button>
+                  <span className="text-xs font-medium text-gray-700 px-2 min-w-[3rem] text-center">
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  <button
+                    onClick={handleZoomIn}
+                    disabled={zoom >= 3}
+                    className="p-1.5 hover:bg-white rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    title="Zoom In (Ctrl + +)"
+                  >
+                    <ZoomIn className="w-4 h-4 text-gray-600" />
+                  </button>
+                  <button
+                    onClick={handleResetZoom}
+                    className="p-1.5 hover:bg-white rounded transition-colors ml-1"
+                    title="Reset Zoom (Ctrl + 0)"
+                  >
+                    <Maximize2 className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
                 {imageNaturalSize.width > 0 && (
                   <>
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
@@ -794,12 +1024,16 @@ function UATDashboard() {
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
                       {fileSize}
                     </span>
+                    {isPDF && (
+                      <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded font-medium">
+                        PDF - Page {currentPage}/{totalPages}
+                      </span>
+                    )}
                   </>
                 )}
               </div>
             </div>
 
-            {/* Vùng hiển thị ảnh 100% width */}
             <div className="flex-1 flex items-start justify-start bg-gray-50/50 overflow-auto relative min-h-0 p-0">
               {error && (
                 <div className="absolute top-4 left-4 right-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start z-10">
@@ -808,47 +1042,84 @@ function UATDashboard() {
                 </div>
               )}
 
+              {isConvertingPDF && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-20">
+                  <div className="text-center">
+                    <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
+                    <p className="text-gray-700 font-medium">Converting PDF to images...</p>
+                    <p className="text-gray-500 text-sm mt-2">This may take a moment</p>
+                  </div>
+                </div>
+              )}
+
               {currentImage ? (
-                <div className="relative w-full h-full">
-                  <img
-                    ref={imageRef}
-                    src={currentImage}
-                    alt="Document"
-                    className="hidden"
-                    onLoad={handleImageLoad}
-                  />
-                  <canvas 
-                    ref={canvasRef} 
-                    onClick={handleCanvasClick} 
-                    className="border border-gray-300 cursor-pointer"
-                    style={{ 
-                      width: '100%',
-                      height: 'auto',
-                      display: 'block'
-                    }}
-                  />
+                <div className="relative w-full h-full flex flex-col">
+                  {isPDF && totalPages > 1 && (
+                    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg border border-gray-200 px-4 py-2 flex items-center gap-3">
+                      <button
+                        onClick={goToPreviousPage}
+                        disabled={currentPage === 1}
+                        className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft className="w-5 h-5" />
+                      </button>
+                      <span className="text-sm font-medium">
+                        Page {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        onClick={goToNextPage}
+                        disabled={currentPage === totalPages}
+                        className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex-1 flex items-center justify-center p-4">
+                    {!isPDF && (
+                      <img
+                        ref={imageRef}
+                        src={currentImage}
+                        alt="Document"
+                        className="hidden"
+                        onLoad={handleImageLoad}
+                      />
+                    )}
+                    <canvas 
+                      ref={canvasRef} 
+                      onClick={handleCanvasClick} 
+                      className="border border-gray-300 cursor-pointer max-w-full max-h-full"
+                      style={{ 
+                        display: 'block',
+                        margin: 'auto',
+                        transform: `scale(${zoom})`,
+                        transformOrigin: 'center center',
+                        transition: 'transform 0.2s ease-out'
+                      }}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-center p-8">
                   <div>
                     <Upload className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-gray-500 font-medium">Upload a photo to get started</p>
+                    <p className="text-gray-500 font-medium">Upload a photo or PDF to get started</p>
+                    <p className="text-gray-400 text-sm mt-2">Supports: JPG, PNG, PDF (max 20MB)</p>
                   </div>
                 </div>
               )}
 
-              {/* Low confidence warning */}
               {lowConfidenceBoxes.length > 0 && (
                 <div className="absolute bottom-4 right-4 bg-yellow-100 border border-yellow-300 text-yellow-800 px-3 py-2 rounded-lg shadow-md text-xs flex items-center gap-2 animate-pulse">
                   <AlertTriangle className="h-4 w-4" />
-                  Phát hiện {lowConfidenceBoxes.length} object độ tin cậy thấp (&lt;0.5)
+                  Phát hiện {lowConfidenceBoxes.length} object độ tin cậy thấp
                 </div>
               )}
             </div>
 
-            {/* Legend */}
             <div className="border-t border-gray-100 px-4 py-2 bg-gray-50 rounded-b-xl flex gap-4 overflow-x-auto shrink-0">
-              {legendClasses.map((cls) => (
+              {Object.keys(CLASS_COLORS).map((cls) => (
                 <div key={cls} className="flex items-center text-xs text-gray-600 whitespace-nowrap">
                   <span 
                     className="w-3 h-3 inline-block rounded-sm mr-1.5" 
@@ -860,9 +1131,7 @@ function UATDashboard() {
             </div>
           </div>
 
-          {/* Analysis Detail Panel */}
           <div className="w-64 flex flex-col gap-4 shrink-0">
-            {/* Summary Card */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
               <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
                 <BarChart2 className="h-4 w-4 text-blue-500" /> Statistical
@@ -872,6 +1141,12 @@ function UATDashboard() {
                   <span className="text-xs text-gray-600">Total Objects</span>
                   <span className="text-sm font-bold text-gray-900">{boxes.length}</span>
                 </div>
+                {isPDF && (
+                  <div className="flex justify-between items-center p-2 bg-purple-50 rounded border border-purple-100">
+                    <span className="text-xs text-purple-700">Page {currentPage}</span>
+                    <span className="text-sm font-bold text-purple-700">{currentPageBoxes.length} objs</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center p-2 bg-green-50 rounded border border-green-100">
                   <span className="text-xs text-green-700">Avg reliability</span>
                   <span className="text-sm font-bold text-green-700">{avgConfidence}</span>
@@ -882,17 +1157,26 @@ function UATDashboard() {
                     {processingTime ? `${processingTime.toFixed(1)}s` : '-'}
                   </span>
                 </div>
+                {isPDF && totalPages > 1 && (
+                  <div className="flex justify-between items-center p-2 bg-purple-50 rounded border border-purple-100">
+                    <span className="text-xs text-purple-700">PDF Pages</span>
+                    <span className="text-sm font-bold text-purple-700">{totalPages}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Object List */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex-1 overflow-hidden flex flex-col min-h-0">
-              <h3 className="text-sm font-bold text-gray-800 mb-3 shrink-0">Identification Details</h3>
+              <h3 className="text-sm font-bold text-gray-800 mb-3 shrink-0">
+                Identification Details {isPDF && `(Page ${currentPage})`}
+              </h3>
               <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
-                {boxes.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-4">No results yet</p>
+                {currentPageBoxes.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-4">
+                    {boxes.length > 0 && isPDF ? 'No detections on this page' : 'No results yet'}
+                  </p>
                 ) : (
-                  boxes.map((box) => {
+                  currentPageBoxes.map((box) => {
                     const isLowConfidence = box.confidence < 0.5;
                     return (
                       <div 
@@ -911,9 +1195,11 @@ function UATDashboard() {
                             className="w-2 h-2 rounded-full shrink-0" 
                             style={{ backgroundColor: box.color }}
                           />
-                          <span className={`text-xs font-medium ${isLowConfidence ? 'text-red-800' : 'text-gray-700'}`}>
-                            {box.class_name}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className={`text-xs font-medium ${isLowConfidence ? 'text-red-800' : 'text-gray-700'}`}>
+                              {box.class_name}
+                            </span>
+                          </div>
                         </div>
                         <div className="flex items-center gap-1">
                           {isLowConfidence && <AlertCircle className="h-3 w-3 text-red-500" />}
@@ -947,7 +1233,6 @@ function UATDashboard() {
   );
 }
 
-// Export with client-side only rendering
 export default function UATDashboardPage() {
   const [isClient, setIsClient] = useState(false);
 

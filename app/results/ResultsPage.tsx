@@ -162,7 +162,7 @@ export default function ResultsPage() {
                 <ScanText className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="text-lg font-bold text-gray-800">UAT Results</h1>
+                <h1 className="text-lg font-bold text-gray-800">Results</h1>
                 <p className="text-xs text-gray-500">Document Layout Analysis System</p>
               </div>
             </div>

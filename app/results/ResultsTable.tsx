@@ -4,10 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Loader2, RefreshCw, Trash2, Eye, Code, CheckCircle,
   XCircle, AlertCircle, ChevronLeft, ChevronRight, Search,
-  Download, Calendar, Image as ImageIcon,
-  Check, X, Sparkles, Grid3X3, Ban, ZoomIn, ZoomOut,
-  Move, MousePointer, RotateCcw, Undo, Redo,
-  Minus
+  Download, Calendar, Image as ImageIcon, X, Sparkles, 
+  Grid3X3, Ban, ZoomIn, ZoomOut, MousePointer, Maximize2
 } from 'lucide-react';
 
 interface Detection {
@@ -15,17 +13,21 @@ interface Detection {
   class_name: string;
   confidence: number;
   bbox: number[];
+  page?: number;
 }
 
 interface SavedResult {
   id: string;
   imageName: string;
-  imageData?: string; // base64 image data
+  imageData?: string;
   imageSize: { width: number; height: number };
   detections: Detection[];
   uatStatus: 'pass' | 'fail';
   uatNote: string;
   timestamp: string;
+  isPDF?: boolean;
+  totalPages?: number;
+  pdfPages?: Array<{ pageNumber: number; imageUrl: string }>;
 }
 
 interface ResultFile {
@@ -33,7 +35,6 @@ interface ResultFile {
   lastUpdated: string;
 }
 
-// Class colors
 const CLASS_COLORS: { [key: string]: string } = {
   'Text': '#a855f7',
   'Title': '#22c55e',
@@ -44,7 +45,6 @@ const CLASS_COLORS: { [key: string]: string } = {
   'Logo': '#92400e',
 };
 
-// Count detections by class
 const countByClass = (detections: Detection[]): { [key: string]: number } => {
   const counts: { [key: string]: number } = {};
   detections.forEach(d => {
@@ -53,7 +53,6 @@ const countByClass = (detections: Detection[]): { [key: string]: number } => {
   return counts;
 };
 
-// Format date
 const formatDate = (timestamp: string): string => {
   if (!timestamp) return '';
   const date = new Date(timestamp);
@@ -68,7 +67,7 @@ const formatDate = (timestamp: string): string => {
   });
 };
 
-// ==================== ANNOTATION POPUP COMPONENT ====================
+// ==================== ANNOTATION POPUP ====================
 interface AnnotationPopupProps {
   result: SavedResult;
   onClose: () => void;
@@ -77,94 +76,132 @@ interface AnnotationPopupProps {
 function AnnotationPopup({ result, onClose }: AnnotationPopupProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [startPan, setStartPan] = useState({ x: 0, y: 0 });
 
-  const classCounts = countByClass(result.detections);
-  const legendClasses = ['Title', 'Text', 'Table', 'Picture', 'Signature', 'Section header', 'Logo'];
+  const isPDF = result.isPDF || false;
+  const totalPages = result.totalPages || 1;
+  const pdfPages = result.pdfPages || [];
 
-  // Draw annotations on canvas
+  const getCurrentImageData = () => {
+    if (isPDF && pdfPages.length > 0) {
+      const pageData = pdfPages.find(p => p.pageNumber === currentPage);
+      return pageData?.imageUrl || result.imageData;
+    }
+    return result.imageData;
+  };
+
+  const currentImageData = getCurrentImageData();
+  const currentPageDetections = isPDF 
+    ? result.detections.filter(d => d.page === currentPage)
+    : result.detections;
+  const classCounts = countByClass(currentPageDetections);
+
+  // Draw annotations
   useEffect(() => {
-    if (!result.imageData || !canvasRef.current) return;
+    if (!currentImageData || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Debug: Log detections data
-    console.log('Drawing annotations for:', result.imageName);
-    console.log('Number of detections:', result.detections?.length || 0);
-    console.log('Detections:', result.detections);
-
     const img = new Image();
     img.onload = () => {
-      // Set canvas size
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      const maxWidth = containerRef.current?.clientWidth || 800;
+      const maxHeight = containerRef.current?.clientHeight || 600;
+      
+      const scaleX = maxWidth / img.naturalWidth;
+      const scaleY = maxHeight / img.naturalHeight;
+      const scale = Math.min(scaleX, scaleY, 1);
+      
+      const displayWidth = img.naturalWidth * scale;
+      const displayHeight = img.naturalHeight * scale;
 
-      // Draw image
-      ctx.drawImage(img, 0, 0);
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
 
-      // Draw bounding boxes
-      result.detections.forEach((det) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+
+      const bboxScaleX = displayWidth / img.naturalWidth;
+      const bboxScaleY = displayHeight / img.naturalHeight;
+
+      currentPageDetections.forEach((det) => {
         const [x, y, width, height] = det.bbox;
         const color = CLASS_COLORS[det.class_name] || '#6b7280';
 
-        // Draw semi-transparent fill
-        ctx.fillStyle = color + '40'; // 25% opacity
-        ctx.fillRect(x, y, width, height);
+        const scaledX = x * bboxScaleX;
+        const scaledY = y * bboxScaleY;
+        const scaledWidth = width * bboxScaleX;
+        const scaledHeight = height * bboxScaleY;
 
-        // Draw border
+        ctx.fillStyle = color + '20';
+        ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
+
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
+        ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
 
-        // Draw label at top-right corner of the box (giống Label Studio)
-        const labelText = det.class_name;
-        ctx.font = 'bold 11px Arial';
+        const labelText = `${det.class_name} ${det.confidence.toFixed(2)}`;
+        ctx.font = 'bold 12px Arial';
         const textMetrics = ctx.measureText(labelText);
-        const labelPadding = 4;
-        const labelHeight = 16;
-        const labelWidth = textMetrics.width + labelPadding * 2;
+        const labelWidth = textMetrics.width + 6;
 
-        // Position label at top-right corner of the box
-        const labelX = x + width - labelWidth;
-        const labelY = y;
-
-        // Draw label background (rounded corners effect)
         ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 2);
-        ctx.fill();
+        ctx.fillRect(scaledX, scaledY, labelWidth, 18);
 
-        // Draw label text
         ctx.fillStyle = 'white';
         ctx.textBaseline = 'middle';
-        ctx.textAlign = 'center';
-        ctx.fillText(labelText, labelX + labelWidth / 2, labelY + labelHeight / 2);
-        
-        // Reset text align
         ctx.textAlign = 'left';
+        ctx.fillText(labelText, scaledX + 3, scaledY + 9);
       });
-
-      setImageLoaded(true);
     };
-    img.onerror = () => {
-      console.error('Failed to load image');
-    };
-    img.src = result.imageData;
-  }, [result]);
+    img.src = currentImageData;
+  }, [currentImageData, currentPageDetections]);
 
-  // Calculate scale to fit container
+  // Zoom controls
+  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 5));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.25));
+  const handleResetZoom = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  // Mouse wheel zoom
   useEffect(() => {
-    if (containerRef.current && imageLoaded) {
-      const containerWidth = containerRef.current.clientWidth - 48;
-      const containerHeight = containerRef.current.clientHeight - 100;
-      const scaleX = containerWidth / result.imageSize.width;
-      const scaleY = containerHeight / result.imageSize.height;
-      setScale(Math.min(scaleX, scaleY, 1));
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setZoom(prev => Math.max(0.25, Math.min(5, prev + delta)));
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // Pan handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (zoom > 1) {
+      setIsPanning(true);
+      setStartPan({ x: e.clientX - pan.x, y: e.clientY - pan.y });
     }
-  }, [imageLoaded, result.imageSize]);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPanning && zoom > 1) {
+      setPan({ x: e.clientX - startPan.x, y: e.clientY - startPan.y });
+    }
+  };
+
+  const handleMouseUp = () => setIsPanning(false);
 
   return (
     <div className="fixed inset-0 bg-black/70 flex z-50" onClick={onClose}>
@@ -183,96 +220,151 @@ function AnnotationPopup({ result, onClose }: AnnotationPopupProps) {
             }`}>
               {result.uatStatus === 'pass' ? '✓ Pass' : '✗ Fail'}
             </span>
+            {isPDF && (
+              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded font-medium">
+                📄 PDF - Page {currentPage}/{totalPages}
+              </span>
+            )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={handleZoomOut}
+                disabled={zoom <= 0.25}
+                className="p-1.5 hover:bg-white rounded disabled:opacity-30 transition-colors"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-4 h-4 text-gray-600" />
+              </button>
+              <span className="text-xs font-medium text-gray-700 px-2 min-w-[3rem] text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onClick={handleZoomIn}
+                disabled={zoom >= 5}
+                className="p-1.5 hover:bg-white rounded disabled:opacity-30 transition-colors"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-4 h-4 text-gray-600" />
+              </button>
+              <button
+                onClick={handleResetZoom}
+                className="p-1.5 hover:bg-white rounded transition-colors ml-1"
+                title="Reset"
+              >
+                <Maximize2 className="w-4 h-4 text-gray-600" />
+              </button>
+            </div>
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+              {result.imageSize.width} × {result.imageSize.height} px
+            </span>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
         </div>
 
-        {/* Main Content */}
+        {/* Canvas Area */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Canvas Area */}
           <div 
             ref={containerRef}
-            className="flex-1 bg-gray-200 flex items-center justify-center p-6 overflow-auto"
+            className="flex-1 bg-gray-50 flex items-center justify-center p-6 overflow-auto relative"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            style={{ cursor: isPanning ? 'grabbing' : zoom > 1 ? 'grab' : 'default' }}
           >
-            <div 
-              className="bg-white shadow-lg rounded-lg overflow-hidden"
-              style={{ 
-                transform: `scale(${scale})`,
-                transformOrigin: 'center center'
-              }}
-            >
-              {result.imageData ? (
-                <canvas ref={canvasRef} className="block" />
-              ) : (
-                <div className="w-96 h-96 flex items-center justify-center bg-gray-100">
-                  <div className="text-center text-gray-400">
-                    <ImageIcon className="w-16 h-16 mx-auto mb-2" />
-                    <p>Không có dữ liệu ảnh</p>
-                  </div>
-                </div>
-              )}
-            </div>
+            {/* PDF Navigation */}
+            {isPDF && totalPages > 1 && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center gap-3">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <span className="text-sm font-medium">Page {currentPage} / {totalPages}</span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
+            {/* Canvas */}
+            {currentImageData ? (
+              <div 
+                style={{
+                  transform: `translate(${pan.x}px, ${pan.y}px)`,
+                  transition: isPanning ? 'none' : 'transform 0.1s'
+                }}
+              >
+                <canvas 
+                  ref={canvasRef} 
+                  className="border border-gray-300 shadow-lg bg-white"
+                  style={{ 
+                    transform: `scale(${zoom})`,
+                    transformOrigin: 'center',
+                    transition: 'transform 0.2s',
+                    pointerEvents: 'none'
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="text-center text-gray-400">
+                <ImageIcon className="w-16 h-16 mx-auto mb-2" />
+                <p>No image data</p>
+              </div>
+            )}
           </div>
 
-          {/* Right Sidebar - Tools */}
-          <div className="w-12 bg-white border-l border-gray-200 flex flex-col items-center py-4 gap-2">
-            <button className="p-2 bg-gray-100 rounded-lg text-gray-700">
+          {/* Tools Sidebar */}
+          <div className="w-12 bg-white border-l flex flex-col items-center py-4 gap-2">
+            <button className="p-2 bg-blue-100 rounded-lg text-blue-700">
               <MousePointer className="w-4 h-4" />
             </button>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400">
-              <Move className="w-4 h-4" />
-            </button>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400">
+            <button onClick={handleZoomIn} className="p-2 hover:bg-gray-100 rounded-lg">
               <ZoomIn className="w-4 h-4" />
             </button>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400">
+            <button onClick={handleZoomOut} className="p-2 hover:bg-gray-100 rounded-lg">
               <ZoomOut className="w-4 h-4" />
-            </button>
-            <div className="w-6 h-px bg-gray-200 my-2" />
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400">
-              <Minus className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Footer - Legend: Chỉ hiển thị các nhãn có trong tài liệu đã lưu */}
-        <div className="bg-white border-t border-gray-200 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 flex-wrap">
-              {/* Chỉ hiển thị các class có count > 0 */}
-              {Object.entries(classCounts).map(([cls, count]) => (
-                <div 
-                  key={cls} 
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-white"
-                  style={{ 
-                    borderColor: CLASS_COLORS[cls] || '#e5e7eb',
-                    backgroundColor: (CLASS_COLORS[cls] || '#6b7280') + '10'
-                  }}
+        {/* Legend Footer */}
+        <div className="bg-white border-t px-4 py-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {Object.entries(classCounts).map(([cls, count]) => (
+              <div 
+                key={cls}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border"
+                style={{ 
+                  borderColor: CLASS_COLORS[cls] || '#e5e7eb',
+                  backgroundColor: (CLASS_COLORS[cls] || '#6b7280') + '10'
+                }}
+              >
+                <span 
+                  className="w-3 h-3 rounded-sm"
+                  style={{ backgroundColor: CLASS_COLORS[cls] }}
+                />
+                <span className="text-sm text-gray-700">{cls}</span>
+                <span 
+                  className="text-sm font-bold"
+                  style={{ color: CLASS_COLORS[cls] }}
                 >
-                  <span 
-                    className="w-3 h-3 rounded-sm"
-                    style={{ backgroundColor: CLASS_COLORS[cls] || '#6b7280' }}
-                  />
-                  <span className="text-sm text-gray-700">{cls}</span>
-                  <span 
-                    className="text-sm font-bold"
-                    style={{ color: CLASS_COLORS[cls] || '#6b7280' }}
-                  >
-                    {count}
-                  </span>
-                </div>
-              ))}
-              {/* Nếu không có nhãn nào */}
-              {Object.keys(classCounts).length === 0 && (
-                <span className="text-sm text-gray-400">Không có nhãn nào</span>
-              )}
-            </div>
-            
+                  {count}
+                </span>
+              </div>
+            ))}
+            {Object.keys(classCounts).length === 0 && (
+              <span className="text-sm text-gray-400">No annotations</span>
+            )}
           </div>
         </div>
       </div>
@@ -280,12 +372,8 @@ function AnnotationPopup({ result, onClose }: AnnotationPopupProps) {
   );
 }
 
-// ==================== MAIN RESULTS TABLE COMPONENT ====================
-interface ResultsTableProps {
-  onViewDetail?: (result: SavedResult) => void;
-}
-
-export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
+// ==================== MAIN TABLE ====================
+export default function ResultsTable() {
   const [results, setResults] = useState<SavedResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -296,8 +384,9 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
   const [itemsPerPage] = useState(10);
   const [popupResult, setPopupResult] = useState<SavedResult | null>(null);
   const [jsonPopupResult, setJsonPopupResult] = useState<SavedResult | null>(null);
+  const [sortBy, setSortBy] = useState<'date' | 'name' | 'detections'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Fetch results
   const fetchResults = async () => {
     setLoading(true);
     setError(null);
@@ -307,7 +396,7 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
         const data: ResultFile = await response.json();
         setResults(data.results || []);
       } else {
-        throw new Error('Failed to fetch results');
+        throw new Error('Failed to fetch');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -320,21 +409,42 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
     fetchResults();
   }, []);
 
-  // Filter and search
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStatus, sortBy, sortOrder, searchQuery]);
+
+  // Filter
   const filteredResults = results.filter(r => {
     const matchesSearch = r.imageName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = filterStatus === 'all' || r.uatStatus === filterStatus;
     return matchesSearch && matchesStatus;
   });
 
-  // Pagination
-  const totalPages = Math.ceil(filteredResults.length / itemsPerPage);
-  const paginatedResults = filteredResults.slice(
+  // Sort
+  const sortedResults = [...filteredResults].sort((a, b) => {
+    let comparison = 0;
+    switch (sortBy) {
+      case 'date':
+        comparison = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        break;
+      case 'name':
+        comparison = a.imageName.localeCompare(b.imageName);
+        break;
+      case 'detections':
+        comparison = a.detections.length - b.detections.length;
+        break;
+    }
+    return sortOrder === 'asc' ? comparison : -comparison;
+  });
+
+  // Paginate
+  const totalPages = Math.ceil(sortedResults.length / itemsPerPage);
+  const paginatedResults = sortedResults.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  // Selection handlers
+  // Selection
   const toggleSelectAll = () => {
     if (selectedIds.size === paginatedResults.length) {
       setSelectedIds(new Set());
@@ -353,26 +463,68 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
     setSelectedIds(newSelected);
   };
 
-  // Delete selected
+  // Delete
   const deleteSelected = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Bạn có chắc muốn xóa ${selectedIds.size} kết quả đã chọn?`)) return;
-    alert('Chức năng xóa từng item đang được phát triển');
+    if (!confirm(`Delete ${selectedIds.size} selected items?`)) return;
+    
+    try {
+      const response = await fetch('/api/save-result', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds) })
+      });
+
+      if (response.ok) {
+        setResults(prev => prev.filter(r => !selectedIds.has(r.id)));
+        setSelectedIds(new Set());
+        alert(`Deleted ${selectedIds.size} items!`);
+      }
+    } catch (err) {
+      alert('Error: ' + (err instanceof Error ? err.message : 'Unknown'));
+    }
   };
 
-  // Export to JSON - chỉ export những kết quả đã chọn
-  const exportJSON = () => {
-    if (selectedIds.size === 0) {
-      alert('Vui lòng chọn ít nhất 1 kết quả để export!');
+  const deleteAll = async () => {
+    if (results.length === 0) return;
+    if (!confirm(`DELETE ALL ${results.length} results? Cannot undo!`)) return;
+    
+    try {
+      const response = await fetch('/api/save-result', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deleteAll: true })
+      });
+
+      if (response.ok) {
+        setResults([]);
+        setSelectedIds(new Set());
+        alert('All deleted!');
+      }
+    } catch (err) {
+      alert('Error: ' + (err instanceof Error ? err.message : 'Unknown'));
+    }
+  };
+
+  // Export
+  const exportJSON = (exportAll = false) => {
+    const toExport = exportAll ? results : results.filter(r => selectedIds.has(r.id));
+    
+    if (!exportAll && toExport.length === 0) {
+      alert('Please select at least 1 item!');
       return;
     }
 
-    const selectedResults = results.filter(r => selectedIds.has(r.id));
-    
-    // Loại bỏ imageData khi export để giảm dung lượng file
-    const exportData = selectedResults.map(r => ({
-      ...r,
-      imageData: undefined // Không export base64 image
+    const exportData = toExport.map(r => ({
+      id: r.id,
+      imageName: r.imageName,
+      imageSize: r.imageSize,
+      detections: r.detections,
+      uatStatus: r.uatStatus,
+      uatNote: r.uatNote,
+      timestamp: r.timestamp,
+      isPDF: r.isPDF,
+      totalPages: r.totalPages
     }));
     
     const dataStr = JSON.stringify({ 
@@ -385,7 +537,7 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `uat_results_${selectedResults.length}_items_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `uat_${exportAll ? 'all' : 'selected'}_${toExport.length}_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -402,105 +554,91 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 flex items-center justify-center">
+      <div className="bg-white rounded-xl shadow-sm border p-8 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-        <span className="ml-3 text-gray-600">Đang tải dữ liệu...</span>
+        <span className="ml-3 text-gray-600">Loading...</span>
       </div>
     );
   }
 
   return (
     <>
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         {/* Header */}
-        <div className="border-b border-gray-200 px-6 py-4">
+        <div className="border-b px-6 py-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-800">Results Saved</h2>
+            <h2 className="text-xl font-bold text-gray-800">📊 Results Management</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={fetchResults}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
                 title="Refresh"
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
               <button
-                onClick={exportJSON}
+                onClick={() => exportJSON(true)}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-purple-600 text-white hover:bg-purple-700 rounded-lg"
+              >
+                <Download className="w-4 h-4" />
+                Export All
+              </button>
+              <button
+                onClick={() => exportJSON(false)}
                 disabled={selectedIds.size === 0}
-                className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg ${
                   selectedIds.size > 0
                     ? 'bg-blue-600 text-white hover:bg-blue-700'
                     : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                 }`}
               >
                 <Download className="w-4 h-4" />
-                Export JSON {selectedIds.size > 0 && `(${selectedIds.size})`}
+                Export ({selectedIds.size})
               </button>
             </div>
           </div>
 
           {/* Stats Cards */}
           <div className="grid grid-cols-4 gap-4 mb-4">
-            <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-              <div className="text-2xl font-bold text-gray-800">{stats.total}</div>
-              <div className="text-xs text-gray-500">Total results</div>
+            <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border">
+              <div className="text-3xl font-bold text-gray-800">{stats.total}</div>
+              <div className="text-xs text-gray-600 font-medium mt-1">Total Results</div>
             </div>
-            {/* <div className="bg-green-50 rounded-lg p-3 border border-green-100">
-              <div className="text-2xl font-bold text-green-600">{stats.pass}</div>
-              <div className="text-xs text-green-600">Pass</div>
-            </div> */}
-            {/* <div className="bg-red-50 rounded-lg p-3 border border-red-100">
-              <div className="text-2xl font-bold text-red-600">{stats.fail}</div>
-              <div className="text-xs text-red-600">Fail</div>
-            </div> */}
-            <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-              <div className="text-2xl font-bold text-blue-600">{stats.totalDetections}</div>
-              <div className="text-xs text-blue-600">Detections</div>
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+              <div className="text-3xl font-bold text-blue-700">{stats.totalDetections}</div>
+              <div className="text-xs text-blue-700 font-medium mt-1">Total Detections</div>
             </div>
           </div>
 
-          {/* Search and Filter */}
+          {/* Search & Filters */}
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by image name..."
+                placeholder="🔍 Search by name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            
+            
+            <button
+              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="px-3 py-2 border rounded-lg hover:bg-gray-50 font-bold"
+            >
+              {sortOrder === 'asc' ? '↑' : '↓'}
+            </button>
+
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
               <button
                 onClick={() => setFilterStatus('all')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  filterStatus === 'all' 
-                    ? 'bg-white text-gray-800 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
+                className={`px-3 py-2 text-xs font-medium rounded-md ${
+                  filterStatus === 'all' ? 'bg-white shadow-sm' : 'text-gray-500'
                 }`}
               >
                 All
-              </button>
-              {/* <button
-                onClick={() => setFilterStatus('pass')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${
-                  filterStatus === 'pass' 
-                    ? 'bg-white text-green-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <CheckCircle className="w-3 h-3" /> Pass
-              </button> */}
-              <button
-                onClick={() => setFilterStatus('fail')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${
-                  filterStatus === 'fail' 
-                    ? 'bg-white text-red-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <XCircle className="w-3 h-3" /> Fail
               </button>
             </div>
           </div>
@@ -509,54 +647,51 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
         {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="w-12 px-4 py-3">
                   <input
                     type="checkbox"
                     checked={selectedIds.size === paginatedResults.length && paginatedResults.length > 0}
                     onChange={toggleSelectAll}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="w-4 h-4 rounded"
                   />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  ID
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">#</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
                   <div className="flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
-                    Completed
+                    Date
                   </div>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  <Grid3X3 className="w-4 h-4 mx-auto text-blue-500"/>
+                <th className="px-4 py-3 text-center text-xs font-semibold uppercase">
+                  <div className="flex items-center justify-center gap-1">
+                    <Grid3X3 className="w-4 h-4 text-blue-500" />
+                    Total
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  <Ban className="w-4 h-4 mx-auto text-red-500"/>
+                <th className="px-4 py-3 text-center text-xs font-semibold uppercase">
+                  <div className="flex items-center justify-center gap-1">
+                    <Ban className="w-4 h-4 text-red-500" />
+                    Fail
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  <Sparkles className="w-4 h-4 mx-auto text-purple-500"/>
+                <th className="px-4 py-3 text-center text-xs font-semibold uppercase">
+                  <div className="flex items-center justify-center gap-1">
+                    <Sparkles className="w-4 h-4 text-green-500" />
+                    Pass
+                  </div>
                 </th>
-                {/* <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Status
-                </th> */}
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Image
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Image</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y">
               {paginatedResults.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center">
-                    <div className="flex flex-col items-center text-gray-400">
-                      <AlertCircle className="w-12 h-12 mb-3" />
-                      <p className="text-sm font-medium">Không có kết quả nào</p>
-                      <p className="text-xs mt-1">Hãy thực hiện detection và lưu kết quả</p>
-                    </div>
+                  <td colSpan={8} className="px-4 py-12 text-center">
+                    <AlertCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                    <p className="text-sm font-medium text-gray-400">No results found</p>
                   </td>
                 </tr>
               ) : (
@@ -567,65 +702,49 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                   return (
                     <tr 
                       key={result.id} 
-                      className={`hover:bg-gray-50 transition-colors ${
-                        selectedIds.has(result.id) ? 'bg-blue-50' : ''
-                      }`}
+                      className={`hover:bg-blue-50 ${selectedIds.has(result.id) ? 'bg-blue-50' : ''}`}
                     >
                       <td className="px-4 py-4">
                         <input
                           type="checkbox"
                           checked={selectedIds.has(result.id)}
                           onChange={() => toggleSelect(result.id)}
-                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          className="w-4 h-4 rounded"
                         />
                       </td>
                       <td className="px-4 py-4">
-                        <span className="text-sm font-medium text-gray-900">{rowIndex}</span>
+                        <span className="text-sm font-bold text-gray-900">{rowIndex}</span>
                       </td>
                       <td className="px-4 py-4">
-                        <span className="text-sm text-gray-600">{formatDate(result.timestamp)}</span>
+                        <span className="text-xs text-gray-600">{formatDate(result.timestamp)}</span>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span className="inline-flex items-center justify-center min-w-[32px] h-8 bg-blue-100 text-blue-700 text-sm font-bold rounded-full px-2">
+                        <span className="inline-flex items-center justify-center w-10 h-10 bg-blue-100 text-blue-700 text-sm font-bold rounded-full">
                           {result.detections.length}
                         </span>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span className="text-sm text-gray-600">
+                        <span className={`inline-flex w-10 h-10 items-center justify-center text-sm font-bold rounded-full ${
+                          result.uatStatus === 'fail' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-300'
+                        }`}>
                           {result.uatStatus === 'fail' ? 1 : 0}
                         </span>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span className="text-sm text-gray-600">
+                        <span className={`inline-flex w-10 h-10 items-center justify-center text-sm font-bold rounded-full ${
+                          result.uatStatus === 'pass' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-300'
+                        }`}>
                           {result.uatStatus === 'pass' ? 1 : 0}
                         </span>
                       </td>
-                      {/* <td className="px-4 py-4">
-                        {result.uatStatus === 'pass' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
-                            <Check className="w-3 h-3" />
-                            Pass
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                            <X className="w-3 h-3" />
-                            Fail
-                          </span>
-                        )}
-                      </td> */}
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
-                          {/* Thumbnail - Click to open popup */}
                           <div 
-                            className="w-16 h-16 bg-gray-100 rounded-lg border border-gray-200 overflow-hidden cursor-pointer hover:border-blue-400 hover:shadow-md transition-all"
+                            className="w-16 h-16 bg-gray-100 rounded-lg border-2 overflow-hidden cursor-pointer hover:border-blue-400"
                             onClick={() => setPopupResult(result)}
                           >
                             {result.imageData ? (
-                              <img 
-                                src={result.imageData} 
-                                alt={result.imageName}
-                                className="w-full h-full object-cover"
-                              />
+                              <img src={result.imageData} alt={result.imageName} className="w-full h-full object-cover" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
                                 <ImageIcon className="w-8 h-8 text-gray-300" />
@@ -634,38 +753,28 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p 
-                              className="text-sm font-medium text-gray-900 truncate max-w-[200px] cursor-pointer hover:text-blue-600" 
-                              title={result.imageName}
+                              className="text-sm font-semibold text-gray-900 truncate max-w-[250px] cursor-pointer hover:text-blue-600" 
                               onClick={() => setPopupResult(result)}
                             >
                               {result.imageName}
                             </p>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-gray-500 mt-0.5">
                               {result.imageSize.width} × {result.imageSize.height} px
+                              {result.isPDF && <span className="ml-2 text-purple-600 font-medium">📄 PDF</span>}
                             </p>
-                            {/* Class counts */}
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {Object.entries(classCounts).slice(0, 3).map(([cls, count]) => (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {Object.entries(classCounts).slice(0, 4).map(([cls, count]) => (
                                 <span 
                                   key={cls}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded"
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded"
                                   style={{ 
                                     backgroundColor: CLASS_COLORS[cls] + '20',
                                     color: CLASS_COLORS[cls]
                                   }}
                                 >
-                                  <span 
-                                    className="w-1.5 h-1.5 rounded-full"
-                                    style={{ backgroundColor: CLASS_COLORS[cls] }}
-                                  />
-                                  {count}
+                                  {cls}: {count}
                                 </span>
                               ))}
-                              {Object.keys(classCounts).length > 3 && (
-                                <span className="text-xs text-gray-400">
-                                  +{Object.keys(classCounts).length - 3}
-                                </span>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -674,15 +783,13 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                         <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={() => setPopupResult(result)}
-                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Xem chi tiết"
+                            className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => setJsonPopupResult(result)}
-                            className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                            title="Xem JSON"
+                            className="p-2 text-purple-500 hover:bg-purple-50 rounded-lg"
                           >
                             <Code className="w-4 h-4" />
                           </button>
@@ -698,17 +805,18 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
-              Hiển thị {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, filteredResults.length)} của {filteredResults.length} kết quả
+          <div className="border-t px-6 py-4 flex items-center justify-between bg-gray-50">
+            <div className="text-sm text-gray-600">
+              Showing <strong>{(currentPage - 1) * itemsPerPage + 1}</strong> - <strong>{Math.min(currentPage * itemsPerPage, sortedResults.length)}</strong> of <strong>{sortedResults.length}</strong>
+              {searchQuery && <span className="text-gray-400"> (filtered from {results.length})</span>}
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-2 hover:bg-white rounded-lg disabled:opacity-30"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-5 h-5" />
               </button>
               {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                 let pageNum;
@@ -725,10 +833,8 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                   <button
                     key={pageNum}
                     onClick={() => setCurrentPage(pageNum)}
-                    className={`w-8 h-8 text-sm font-medium rounded-lg transition-colors ${
-                      currentPage === pageNum
-                        ? 'bg-blue-600 text-white'
-                        : 'text-gray-500 hover:bg-gray-100'
+                    className={`w-10 h-10 text-sm font-bold rounded-lg ${
+                      currentPage === pageNum ? 'bg-blue-600 text-white' : 'hover:bg-white'
                     }`}
                   >
                     {pageNum}
@@ -738,100 +844,79 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-2 hover:bg-white rounded-lg disabled:opacity-30"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-5 h-5" />
               </button>
             </div>
           </div>
         )}
 
-        {/* Selected Actions Bar */}
+        {/* Selected Bar */}
         {selectedIds.size > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-xl shadow-lg flex items-center gap-4 z-40">
-            <span className="text-sm">
-              Đã chọn <strong>{selectedIds.size}</strong> kết quả
-            </span>
-            <div className="w-px h-6 bg-gray-700" />
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 z-50">
+            <span className="text-sm">Selected <strong>{selectedIds.size}</strong> items</span>
+            <div className="w-px h-8 bg-gray-600" />
             <button
-              onClick={deleteSelected}
-              className="flex items-center gap-2 px-3 py-1.5 bg-red-500 hover:bg-red-600 rounded-lg text-sm font-medium transition-colors"
+              onClick={() => exportJSON(false)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-bold"
             >
-              <Trash2 className="w-4 h-4" />
-              Xóa
+              <Download className="w-4 h-4" />
+              Export
             </button>
             <button
               onClick={() => setSelectedIds(new Set())}
-              className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors"
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold"
             >
-              Bỏ chọn
+              Clear
             </button>
           </div>
         )}
       </div>
 
-      {/* Annotation Popup */}
-      {popupResult && (
-        <AnnotationPopup 
-          result={popupResult} 
-          onClose={() => setPopupResult(null)} 
-        />
-      )}
+      {/* Popups */}
+      {popupResult && <AnnotationPopup result={popupResult} onClose={() => setPopupResult(null)} />}
 
-      {/* JSON Popup */}
       {jsonPopupResult && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setJsonPopupResult(null)}>
-          <div 
-            className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between bg-gray-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setJsonPopupResult(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b px-6 py-4 flex items-center justify-between bg-gradient-to-r from-purple-50 to-blue-50">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <Code className="w-5 h-5 text-purple-600" />
+                <div className="p-3 bg-purple-600 rounded-xl">
+                  <Code className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-800">JSON Data</h3>
-                  <p className="text-sm text-gray-500">{jsonPopupResult.imageName}</p>
+                  <h3 className="font-bold text-lg">JSON Data</h3>
+                  <p className="text-sm text-gray-600">{jsonPopupResult.imageName}</p>
                 </div>
               </div>
-              <button
-                onClick={() => setJsonPopupResult(null)}
-                className="p-2 hover:bg-gray-200 rounded-lg transition-colors text-gray-500"
-              >
-                <X className="w-5 h-5" />
+              <button onClick={() => setJsonPopupResult(null)} className="p-2 hover:bg-gray-200 rounded-lg">
+                <X className="w-6 h-6" />
               </button>
             </div>
 
-            {/* JSON Content */}
-            <div className="flex-1 overflow-auto p-4 bg-gray-900">
+            <div className="flex-1 overflow-auto p-6 bg-gray-900">
               <pre className="text-sm text-green-400 font-mono whitespace-pre-wrap">
-                {JSON.stringify(
-                  {
-                    id: jsonPopupResult.id,
-                    imageName: jsonPopupResult.imageName,
-                    imageSize: jsonPopupResult.imageSize,
-                    detections: jsonPopupResult.detections,
-                    uatStatus: jsonPopupResult.uatStatus,
-                    uatNote: jsonPopupResult.uatNote,
-                    timestamp: jsonPopupResult.timestamp
-                  }, 
-                  null, 
-                  2
-                )}
+                {JSON.stringify({
+                  id: jsonPopupResult.id,
+                  imageName: jsonPopupResult.imageName,
+                  imageSize: jsonPopupResult.imageSize,
+                  detections: jsonPopupResult.detections,
+                  uatStatus: jsonPopupResult.uatStatus,
+                  uatNote: jsonPopupResult.uatNote,
+                  timestamp: jsonPopupResult.timestamp
+                }, null, 2)}
               </pre>
             </div>
 
-            {/* Footer */}
-            <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between bg-gray-50">
-              <div className="text-sm text-gray-500">
-                {jsonPopupResult.detections.length} detections • {jsonPopupResult.uatStatus === 'pass' ? '✓ Pass' : '✗ Fail'}
+            <div className="border-t px-6 py-4 flex items-center justify-between bg-gray-50">
+              <div className="text-sm font-medium">
+                {jsonPopupResult.detections.length} detections • {jsonPopupResult.uatStatus}
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex gap-3">
                 <button
                   onClick={() => {
-                    const dataStr = JSON.stringify({
+                    navigator.clipboard.writeText(JSON.stringify({
                       id: jsonPopupResult.id,
                       imageName: jsonPopupResult.imageName,
                       imageSize: jsonPopupResult.imageSize,
@@ -839,14 +924,13 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                       uatStatus: jsonPopupResult.uatStatus,
                       uatNote: jsonPopupResult.uatNote,
                       timestamp: jsonPopupResult.timestamp
-                    }, null, 2);
-                    navigator.clipboard.writeText(dataStr);
-                    alert('Đã copy JSON vào clipboard!');
+                    }, null, 2));
+                    alert('✓ Copied!');
                   }}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-bold flex items-center gap-2"
                 >
                   <Code className="w-4 h-4" />
-                  Copy JSON
+                  Copy
                 </button>
                 <button
                   onClick={() => {
@@ -863,16 +947,14 @@ export default function ResultsTable({ onViewDetail }: ResultsTableProps) {
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = url;
-                    link.download = `${jsonPopupResult.imageName.split('.')[0]}_data.json`;
-                    document.body.appendChild(link);
+                    link.download = `${jsonPopupResult.imageName.split('.')[0]}.json`;
                     link.click();
-                    document.body.removeChild(link);
                     URL.revokeObjectURL(url);
                   }}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold flex items-center gap-2"
                 >
                   <Download className="w-4 h-4" />
-                  Download JSON
+                  Download
                 </button>
               </div>
             </div>
