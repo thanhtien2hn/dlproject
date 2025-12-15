@@ -928,7 +928,7 @@ function UATDashboard() {
             <div className="mb-4">
               <textarea 
                 placeholder="Note (optional...)" 
-                className="w-full border border-gray-300 rounded-md p-2 text-sm h-20 resize-none focus:ring-blue-500 focus:border-blue-500"
+                className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-900 h-20 resize-none focus:ring-blue-500 focus:border-blue-500"
                 value={uatNote}
                 onChange={(e) => setUatNote(e.target.value)}
               />
@@ -1055,9 +1055,9 @@ function UATDashboard() {
                         disabled={currentPage === 1}
                         className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
-                        <ChevronLeft className="w-5 h-5" />
+                        <ChevronLeft className="w-5 h-5 text-gray-900" />
                       </button>
-                      <span className="text-sm font-medium">
+                      <span className="text-sm font-medium text-gray-900">
                         Page {currentPage} / {totalPages}
                       </span>
                       <button
@@ -1065,7 +1065,7 @@ function UATDashboard() {
                         disabled={currentPage === totalPages}
                         className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
-                        <ChevronRight className="w-5 h-5" />
+                        <ChevronRight className="w-5 h-5 text-gray-900" />
                       </button>
                     </div>
                   )}
