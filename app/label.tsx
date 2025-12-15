@@ -53,12 +53,6 @@ const CLASS_COLORS: { [key: string]: string } = {
   'Table': '#eab308',
   'Signature': '#ec4899',
   'Logo': '#92400e',
-  'Caption': '#06b6d4',
-  'Footnote': '#8b5cf6',
-  'Formula': '#f59e0b',
-  'List-item': '#10b981',
-  'Page-footer': '#ec4899',
-  'Page-header': '#3b82f6',
 };
 
 const getClassColor = (className: string): string => {
