@@ -178,7 +178,7 @@ export default function ResultsPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto p-6">
-        <ResultsTable onViewDetail={(result) => setSelectedResult(result)} />
+        <ResultsTable />
       </main>
 
       {/* Detail Modal */}
