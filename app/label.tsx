@@ -841,12 +841,12 @@ function UATDashboard() {
           <div className="p-5 border-b border-gray-100">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">2. Configuration Model</h3>
 
-            <div className="mb-4">
+            {/* <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">Model Version</label>
               <select className="w-full border-gray-300 border rounded-md py-2 px-3 text-sm bg-white shadow-sm">
                 <option>{modelInfo?.model_path || 'best.pt'} (Current)</option>
               </select>
-            </div>
+            </div> */}
 
             <div className="mb-4">
               <div className="flex justify-between mb-1">
