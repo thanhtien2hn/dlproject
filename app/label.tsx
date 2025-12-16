@@ -548,18 +548,36 @@ function UATDashboard() {
     const scaledWidth = width * scaleX;
     const scaledHeight = height * scaleY;
 
-    ctx.fillStyle = box.color + '1A';
-    ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
+    // Enhanced fill for selected box
+    if (isSelected) {
+      ctx.fillStyle = box.color + '40'; // More opaque background when selected
+      ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
+      
+      // Add glow effect with multiple layers
+      ctx.shadowColor = box.color;
+      ctx.shadowBlur = 15;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    } else {
+      ctx.fillStyle = box.color + '1A'; // Light background when not selected
+      ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
+      ctx.shadowBlur = 0;
+    }
     
-    ctx.strokeStyle = box.color;
-    ctx.lineWidth = isSelected ? 3 : 2;
+    // Draw border
+    ctx.strokeStyle = isSelected ? '#000000' : box.color; // Black border when selected
+    ctx.lineWidth = isSelected ? 4 : 2; // Thicker border when selected
     ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
+    
+    // Reset shadow for text
+    ctx.shadowBlur = 0;
 
+    // Draw label
     const labelText = `${box.class_name} ${box.confidence.toFixed(2)}`;
     ctx.font = 'bold 12px Arial';
     const textWidth = ctx.measureText(labelText).width;
 
-    ctx.fillStyle = box.color;
+    ctx.fillStyle = isSelected ? '#000000' : box.color; // Black label when selected
     ctx.fillRect(scaledX, scaledY, textWidth + 6, 18);
     
     ctx.fillStyle = 'white';
@@ -1180,25 +1198,26 @@ function UATDashboard() {
                 ) : (
                   currentPageBoxes.map((box) => {
                     const isLowConfidence = box.confidence < 0.5;
+                    const isSelected = box.id === selectedBoxId;
                     return (
                       <div 
                         key={box.id}
                         onClick={() => setSelectedBoxId(box.id === selectedBoxId ? null : box.id)}
-                        className={`p-2 rounded border transition-colors flex justify-between items-center cursor-pointer ${
+                        className={`p-2 rounded border transition-all flex justify-between items-center cursor-pointer ${
                           isLowConfidence 
                             ? 'border-red-200 bg-red-50 hover:bg-red-100' 
-                            : box.id === selectedBoxId
-                            ? 'border-blue-300 bg-blue-50'
+                            : isSelected
+                            ? 'border-blue-500 bg-blue-100 shadow-lg ring-2 ring-blue-300'
                             : 'border-gray-100 hover:bg-gray-50'
                         }`}
                       >
                         <div className="flex items-center gap-2">
                           <span 
-                            className="w-2 h-2 rounded-full shrink-0" 
+                            className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
                             style={{ backgroundColor: box.color }}
                           />
                           <div className="flex flex-col">
-                            <span className={`text-xs font-medium ${isLowConfidence ? 'text-red-800' : 'text-gray-700'}`}>
+                            <span className={`text-xs font-medium ${isLowConfidence ? 'text-red-800' : isSelected ? 'text-blue-900 font-bold' : 'text-gray-700'}`}>
                               {box.class_name}
                             </span>
                           </div>
@@ -1208,6 +1227,8 @@ function UATDashboard() {
                           <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
                             isLowConfidence 
                               ? 'text-red-600 bg-white border border-red-200' 
+                              : isSelected
+                              ? 'text-blue-700 bg-blue-200 border border-blue-400'
                               : 'text-green-600 bg-green-50'
                           }`}>
                             {box.confidence.toFixed(2)}
