@@ -55,9 +55,8 @@ const CLASS_COLORS: { [key: string]: string } = {
   'Logo': '#92400e',
 };
 
-// THAY ĐỔI: Tăng giới hạn file size từ 20MB lên 100MB
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
-const MAX_FILE_SIZE_TEXT = '100MB'; // Text hiển thị
+const MAX_FILE_SIZE_TEXT = '100MB';
 
 const getClassColor = (className: string): string => {
   return CLASS_COLORS[className] || '#6b7280';
@@ -75,13 +74,13 @@ function UATDashboard() {
   const [imageName, setImageName] = useState<string>('');
   const [boxes, setBoxes] = useState<BoundingBox[]>([]);
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
+  const [hoveredBoxId, setHoveredBoxId] = useState<string | null>(null); // NEW: hover state
   const [labeledImages, setLabeledImages] = useState<LabeledImage[]>([]);
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [isDetecting, setIsDetecting] = useState(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
-  // const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
   const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
@@ -159,6 +158,7 @@ function UATDashboard() {
     return () => clearInterval(interval);
   }, [backendUrl]);
 
+  // MODIFIED: Update canvas when hoveredBoxId changes
   const drawCanvas = useCallback(() => {
     if (isPDF) {
       const currentPageData = pdfPages.find(p => p.pageNumber === currentPage);
@@ -183,7 +183,8 @@ function UATDashboard() {
 
         const pageBoxes = boxes.filter(b => b.page === currentPage);
         pageBoxes.forEach((box) => {
-          drawBox(ctx, box, box.id === selectedBoxId, scaleX, scaleY);
+          const isHighlighted = box.id === selectedBoxId || box.id === hoveredBoxId;
+          drawBox(ctx, box, isHighlighted, scaleX, scaleY);
         });
       };
       img.src = currentPageData.imageUrl;
@@ -208,16 +209,17 @@ function UATDashboard() {
       const scaleY = image.height / imageNaturalSize.height;
 
       boxes.forEach((box) => {
-        drawBox(ctx, box, box.id === selectedBoxId, scaleX, scaleY);
+        const isHighlighted = box.id === selectedBoxId || box.id === hoveredBoxId;
+        drawBox(ctx, box, isHighlighted, scaleX, scaleY);
       });
     }
-  }, [boxes, currentImage, selectedBoxId, imageNaturalSize, imageLoaded, isPDF, pdfPages, currentPage]);
+  }, [boxes, currentImage, selectedBoxId, hoveredBoxId, imageNaturalSize, imageLoaded, isPDF, pdfPages, currentPage]);
 
   useEffect(() => {
     if (currentImage && (imageLoaded || (isPDF && pdfPages.length > 0))) {
       drawCanvas();
     }
-  }, [drawCanvas, currentImage, imageLoaded, isPDF, pdfPages]);
+  }, [drawCanvas, currentImage, imageLoaded, isPDF, pdfPages, hoveredBoxId]);
 
   useEffect(() => {
     if (saveMessage) {
@@ -346,7 +348,6 @@ function UATDashboard() {
       return;
     }
 
-    // THAY ĐỔI: Kiểm tra với giới hạn mới 100MB
     if (file.size > MAX_FILE_SIZE) {
       setError(`File quá lớn! Tối đa ${MAX_FILE_SIZE_TEXT}.`);
       return;
@@ -534,10 +535,11 @@ function UATDashboard() {
     }
   };
 
+  // MODIFIED: Enhanced drawBox with stronger hover highlight
   const drawBox = (
     ctx: CanvasRenderingContext2D, 
     box: BoundingBox, 
-    isSelected: boolean,
+    isHighlighted: boolean,
     scaleX: number,
     scaleY: number
   ) => {
@@ -548,25 +550,25 @@ function UATDashboard() {
     const scaledWidth = width * scaleX;
     const scaledHeight = height * scaleY;
 
-    // Enhanced fill for selected box
-    if (isSelected) {
-      ctx.fillStyle = box.color + '40'; // More opaque background when selected
+    // Enhanced fill for highlighted box
+    if (isHighlighted) {
+      ctx.fillStyle = box.color + '50'; // More opaque background when highlighted
       ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
       
-      // Add glow effect with multiple layers
+      // Add glow effect
       ctx.shadowColor = box.color;
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 20;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
     } else {
-      ctx.fillStyle = box.color + '1A'; // Light background when not selected
+      ctx.fillStyle = box.color + '1A'; // Light background when not highlighted
       ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
       ctx.shadowBlur = 0;
     }
     
     // Draw border
-    ctx.strokeStyle = isSelected ? '#000000' : box.color; // Black border when selected
-    ctx.lineWidth = isSelected ? 4 : 2; // Thicker border when selected
+    ctx.strokeStyle = isHighlighted ? '#ef4444' : box.color; // Red border when highlighted
+    ctx.lineWidth = isHighlighted ? 5 : 2; // Much thicker border when highlighted
     ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
     
     // Reset shadow for text
@@ -577,7 +579,7 @@ function UATDashboard() {
     ctx.font = 'bold 12px Arial';
     const textWidth = ctx.measureText(labelText).width;
 
-    ctx.fillStyle = isSelected ? '#000000' : box.color; // Black label when selected
+    ctx.fillStyle = isHighlighted ? '#ef4444' : box.color; // Red label when highlighted
     ctx.fillRect(scaledX, scaledY, textWidth + 6, 18);
     
     ctx.fillStyle = 'white';
@@ -866,13 +868,6 @@ function UATDashboard() {
 
           <div className="p-5 border-b border-gray-100">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">2. Configuration Model</h3>
-
-            {/* <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Model Version</label>
-              <select className="w-full border-gray-300 border rounded-md py-2 px-3 text-sm bg-white shadow-sm">
-                <option>{modelInfo?.model_path || 'best.pt'} (Current)</option>
-              </select>
-            </div> */}
 
             <div className="mb-4">
               <div className="flex justify-between mb-1">
@@ -1198,26 +1193,28 @@ function UATDashboard() {
                 ) : (
                   currentPageBoxes.map((box) => {
                     const isLowConfidence = box.confidence < 0.5;
-                    const isSelected = box.id === selectedBoxId;
+                    const isHighlighted = box.id === selectedBoxId || box.id === hoveredBoxId;
                     return (
                       <div 
                         key={box.id}
                         onClick={() => setSelectedBoxId(box.id === selectedBoxId ? null : box.id)}
+                        onMouseEnter={() => setHoveredBoxId(box.id)}
+                        onMouseLeave={() => setHoveredBoxId(null)}
                         className={`p-2 rounded border transition-all flex justify-between items-center cursor-pointer ${
                           isLowConfidence 
                             ? 'border-red-200 bg-red-50 hover:bg-red-100' 
-                            : isSelected
-                            ? 'border-blue-500 bg-blue-100 shadow-lg ring-2 ring-blue-300'
+                            : isHighlighted
+                            ? 'border-red-500 bg-red-100 shadow-lg ring-2 ring-red-300'
                             : 'border-gray-100 hover:bg-gray-50'
                         }`}
                       >
                         <div className="flex items-center gap-2">
                           <span 
-                            className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                            className={`w-2 h-2 rounded-full shrink-0 ${isHighlighted ? 'ring-2 ring-red-500 ring-offset-1' : ''}`}
                             style={{ backgroundColor: box.color }}
                           />
                           <div className="flex flex-col">
-                            <span className={`text-xs font-medium ${isLowConfidence ? 'text-red-800' : isSelected ? 'text-blue-900 font-bold' : 'text-gray-700'}`}>
+                            <span className={`text-xs font-medium ${isLowConfidence ? 'text-red-800' : isHighlighted ? 'text-red-900 font-bold' : 'text-gray-700'}`}>
                               {box.class_name}
                             </span>
                           </div>
@@ -1227,8 +1224,8 @@ function UATDashboard() {
                           <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
                             isLowConfidence 
                               ? 'text-red-600 bg-white border border-red-200' 
-                              : isSelected
-                              ? 'text-blue-700 bg-blue-200 border border-blue-400'
+                              : isHighlighted
+                              ? 'text-red-700 bg-red-200 border border-red-400'
                               : 'text-green-600 bg-green-50'
                           }`}>
                             {box.confidence.toFixed(2)}
