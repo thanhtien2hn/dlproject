@@ -1057,7 +1057,7 @@ function UATDashboard() {
               {currentImage ? (
                 <div className="relative w-full h-full flex flex-col">
                   {isPDF && totalPages > 1 && (
-                    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg border border-gray-200 px-4 py-2 flex items-center gap-3">
+                    <div className="sticky top-4 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg border border-gray-200 px-4 py-2 flex items-center gap-3 w-fit mx-auto mb-4">
                       <button
                         onClick={goToPreviousPage}
                         disabled={currentPage === 1}
