@@ -653,7 +653,7 @@ function UATDashboard() {
 
   const saveAnnotation = async () => {
     if (!currentImage || boxes.length === 0) {
-      setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!' });
+      setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!!!' });
       return;
     }
 
