@@ -55,6 +55,10 @@ const CLASS_COLORS: { [key: string]: string } = {
   'Logo': '#92400e',
 };
 
+// THAY ĐỔI: Tăng giới hạn file size từ 20MB lên 100MB
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_FILE_SIZE_TEXT = '100MB'; // Text hiển thị
+
 const getClassColor = (className: string): string => {
   return CLASS_COLORS[className] || '#6b7280';
 };
@@ -342,8 +346,9 @@ function UATDashboard() {
       return;
     }
 
-    if (file.size > 20 * 1024 * 1024) {
-      setError('File quá lớn! Tối đa 20MB.');
+    // THAY ĐỔI: Kiểm tra với giới hạn mới 100MB
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`File quá lớn! Tối đa ${MAX_FILE_SIZE_TEXT}.`);
       return;
     }
 
@@ -768,7 +773,7 @@ function UATDashboard() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-800">Dashboard</h1>
-            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 2.2</p>
+            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 2.2 • Max {MAX_FILE_SIZE_TEXT}</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -818,6 +823,9 @@ function UATDashboard() {
               <UploadCloud className="mx-auto h-6 w-6 text-gray-400 mb-1" />
               <p className="text-xs text-gray-500">
                 drag/drop image or PDF
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Max {MAX_FILE_SIZE_TEXT}
               </p>
             </div>
 
@@ -1099,7 +1107,7 @@ function UATDashboard() {
                   <div>
                     <Upload className="w-16 h-16 mx-auto mb-4 text-gray-300" />
                     <p className="text-gray-500 font-medium">Upload a photo or PDF to get started</p>
-                    <p className="text-gray-400 text-sm mt-2">Supports: JPG, PNG, PDF (max 20MB)</p>
+                    <p className="text-gray-400 text-sm mt-2">Supports: JPG, PNG, PDF (max {MAX_FILE_SIZE_TEXT})</p>
                   </div>
                 </div>
               )}
