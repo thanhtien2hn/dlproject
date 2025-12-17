@@ -725,7 +725,7 @@ function UATDashboard() {
   };
 
   const clearAllResults = async () => {
-    if (!confirm('Bạn có chắc muốn xóa tất cả kết quả đã lưu?')) return;
+    if (!confirm('Bạn có chắc muốn xóa tất cả kết quả đã lưu???')) return;
 
     try {
       const response = await fetch('/api/save-result', {
