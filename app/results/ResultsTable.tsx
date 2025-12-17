@@ -651,14 +651,7 @@ export default function ResultsTable() {
               <div className="text-3xl font-bold text-blue-700">{stats.totalDetections}</div>
               <div className="text-xs text-blue-700 font-medium mt-1">Total Detections</div>
             </div>
-            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
-              <div className="text-3xl font-bold text-green-700">{stats.pass}</div>
-              <div className="text-xs text-green-700 font-medium mt-1">Pass</div>
-            </div>
-            <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-4 border border-red-200">
-              <div className="text-3xl font-bold text-red-700">{stats.fail}</div>
-              <div className="text-xs text-red-700 font-medium mt-1">Fail</div>
-            </div>
+
           </div>
 
           {/* Search & Filters */}
