@@ -287,7 +287,7 @@ export async function DELETE() {
     };
     
     fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
-    console.log(`🗑️ Cleared all results in: ${RESULT_FILE}!`);
+    console.log(`🗑️ Cleared all results in: ${RESULT_FILE}`);
     
     return NextResponse.json({ 
       success: true, 
