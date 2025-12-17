@@ -5,7 +5,8 @@ import {
   Loader2, RefreshCw, Trash2, Eye, Code, CheckCircle,
   XCircle, AlertCircle, ChevronLeft, ChevronRight, Search,
   Download, Calendar, Image as ImageIcon, X, Sparkles, 
-  Grid3X3, Ban, ZoomIn, ZoomOut, MousePointer, Maximize2
+  Grid3X3, Ban, ZoomIn, ZoomOut, MousePointer, Maximize2,
+  HardDrive, Info
 } from 'lucide-react';
 
 interface Detection {
@@ -33,6 +34,7 @@ interface SavedResult {
 interface ResultFile {
   results: SavedResult[];
   lastUpdated: string;
+  filePath?: string; // ✅ Thêm thông tin đường dẫn file
 }
 
 const CLASS_COLORS: { [key: string]: string } = {
@@ -386,6 +388,8 @@ export default function ResultsTable() {
   const [jsonPopupResult, setJsonPopupResult] = useState<SavedResult | null>(null);
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'detections'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [filePath, setFilePath] = useState<string>(''); // ✅ Thêm state để lưu đường dẫn file
+  const [showFileInfo, setShowFileInfo] = useState(false); // ✅ Toggle hiển thị thông tin file
 
   const fetchResults = async () => {
     setLoading(true);
@@ -395,6 +399,8 @@ export default function ResultsTable() {
       if (response.ok) {
         const data: ResultFile = await response.json();
         setResults(data.results || []);
+        setFilePath(data.filePath || 'Unknown'); // ✅ Lưu đường dẫn file
+        console.log('📂 Reading from:', data.filePath); // Debug log
       } else {
         throw new Error('Failed to fetch');
       }
@@ -530,7 +536,8 @@ export default function ResultsTable() {
     const dataStr = JSON.stringify({ 
       results: exportData,
       exportedAt: new Date().toISOString(),
-      totalExported: exportData.length
+      totalExported: exportData.length,
+      sourceFile: filePath // ✅ Thêm thông tin nguồn
     }, null, 2);
     
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -567,7 +574,19 @@ export default function ResultsTable() {
         {/* Header */}
         <div className="border-b px-6 py-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-800">📊 Results Management</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold text-gray-800">📊 Results Management</h2>
+              {/* ✅ Thêm badge hiển thị đường dẫn file */}
+              <button
+                onClick={() => setShowFileInfo(!showFileInfo)}
+                className="flex items-center gap-2 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition-colors"
+                title="Click to see file location"
+              >
+                <HardDrive className="w-3 h-3 text-gray-600" />
+                <span className="text-gray-700 font-mono">{filePath ? filePath.split('/').pop() : 'result.json'}</span>
+                <Info className="w-3 h-3 text-gray-400" />
+              </button>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={fetchResults}
@@ -598,6 +617,30 @@ export default function ResultsTable() {
             </div>
           </div>
 
+          {/* ✅ File Info Panel (collapsible) */}
+          {showFileInfo && filePath && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <HardDrive className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs font-semibold text-blue-900 mb-1">Data Source Location:</p>
+                  <code className="text-xs bg-white px-2 py-1 rounded border border-blue-200 text-blue-700 font-mono block">
+                    {filePath}
+                  </code>
+                  <p className="text-xs text-blue-600 mt-2">
+                    💡 All results are being read from and saved to this file location.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowFileInfo(false)}
+                  className="p-1 hover:bg-blue-100 rounded"
+                >
+                  <X className="w-4 h-4 text-blue-600" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Stats Cards */}
           <div className="grid grid-cols-4 gap-4 mb-4">
             <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border">
@@ -607,6 +650,14 @@ export default function ResultsTable() {
             <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
               <div className="text-3xl font-bold text-blue-700">{stats.totalDetections}</div>
               <div className="text-xs text-blue-700 font-medium mt-1">Total Detections</div>
+            </div>
+            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+              <div className="text-3xl font-bold text-green-700">{stats.pass}</div>
+              <div className="text-xs text-green-700 font-medium mt-1">Pass</div>
+            </div>
+            <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-4 border border-red-200">
+              <div className="text-3xl font-bold text-red-700">{stats.fail}</div>
+              <div className="text-xs text-red-700 font-medium mt-1">Fail</div>
             </div>
           </div>
 
@@ -622,7 +673,6 @@ export default function ResultsTable() {
                 className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
             
             <button
               onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
@@ -692,6 +742,11 @@ export default function ResultsTable() {
                   <td colSpan={8} className="px-4 py-12 text-center">
                     <AlertCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
                     <p className="text-sm font-medium text-gray-400">No results found</p>
+                    {filePath && (
+                      <p className="text-xs text-gray-400 mt-2">
+                        Reading from: <code className="bg-gray-100 px-2 py-1 rounded">{filePath}</code>
+                      </p>
+                    )}
                   </td>
                 </tr>
               ) : (
