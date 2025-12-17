@@ -5,8 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-// ✅ Đường dẫn ưu tiên, có fallback
-const PREFERRED_PATH = '/home/administrator/result.json';
+// ✅ Đường dẫn ưu tiên - Sử dụng thư mục data riêng
+const PREFERRED_PATH = '/home/administrator/data/result.json';
 const FALLBACK_PATH = path.join(process.cwd(), 'result.json');
 
 let RESULT_FILE = PREFERRED_PATH;
@@ -36,30 +36,50 @@ interface ResultFile {
   lastUpdated: string;
 }
 
-// Helper: Kiểm tra xem có thể ghi vào đường dẫn không
-function canWriteToPath(filePath: string): boolean {
+// Helper: Kiểm tra và tạo thư mục nếu cần
+function ensureDirectoryExists(filePath: string): boolean {
   try {
     const dir = path.dirname(filePath);
     
-    // Tạo thư mục nếu chưa tồn tại
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      console.log(`📁 Creating directory: ${dir}`);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
     }
-    
-    // Test write
-    const testFile = path.join(dir, '.write_test');
-    fs.writeFileSync(testFile, 'test');
-    fs.unlinkSync(testFile);
     
     return true;
   } catch (error) {
-    console.error(`Cannot write to ${filePath}:`, error);
+    console.error(`❌ Cannot create directory for ${filePath}:`, error);
+    return false;
+  }
+}
+
+// Helper: Kiểm tra xem có thể ghi vào đường dẫn không
+function canWriteToPath(filePath: string): boolean {
+  try {
+    // Đảm bảo thư mục tồn tại
+    if (!ensureDirectoryExists(filePath)) {
+      return false;
+    }
+    
+    const dir = path.dirname(filePath);
+    
+    // Test write với file tạm
+    const testFile = path.join(dir, '.write_test_' + Date.now());
+    fs.writeFileSync(testFile, 'test', { mode: 0o666 });
+    fs.unlinkSync(testFile);
+    
+    console.log(`✅ Write test successful for: ${dir}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Cannot write to ${filePath}:`, error);
     return false;
   }
 }
 
 // Helper: Chọn đường dẫn phù hợp
 function selectResultFilePath(): string {
+  console.log('🔍 Selecting result file path...');
+  
   // Thử đường dẫn ưu tiên trước
   if (canWriteToPath(PREFERRED_PATH)) {
     console.log(`✅ Using preferred path: ${PREFERRED_PATH}`);
@@ -67,11 +87,12 @@ function selectResultFilePath(): string {
   }
   
   // Fallback về thư mục project
-  console.warn(`⚠️ Cannot write to ${PREFERRED_PATH}, using fallback: ${FALLBACK_PATH}`);
+  console.warn(`⚠️ Cannot write to ${PREFERRED_PATH}`);
+  console.log(`📌 Using fallback path: ${FALLBACK_PATH}`);
   return FALLBACK_PATH;
 }
 
-// Initialize path
+// Initialize path khi module được load
 RESULT_FILE = selectResultFilePath();
 
 // Helper function để đọc file an toàn
@@ -80,16 +101,15 @@ function readResultFile(): ResultFile {
   
   try {
     // Đảm bảo thư mục tồn tại
-    const dir = path.dirname(RESULT_FILE);
-    if (!fs.existsSync(dir)) {
-      console.log(`Creating directory: ${dir}`);
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    ensureDirectoryExists(RESULT_FILE);
     
     // Kiểm tra file có tồn tại không
     if (!fs.existsSync(RESULT_FILE)) {
-      console.log(`Creating new file: ${RESULT_FILE}`);
-      fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
+      console.log(`📝 Creating new file: ${RESULT_FILE}`);
+      fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), { 
+        encoding: 'utf-8',
+        mode: 0o666
+      });
       return emptyData;
     }
     
@@ -112,22 +132,19 @@ function readResultFile(): ResultFile {
     
     return data;
   } catch (error) {
-    console.error('Error reading result file:', error);
+    console.error('❌ Error reading result file:', error);
     
     // Thử fallback nếu đang dùng preferred path
     if (RESULT_FILE === PREFERRED_PATH) {
-      console.log('Trying fallback path...');
+      console.log('🔄 Trying fallback path...');
       RESULT_FILE = FALLBACK_PATH;
       
       try {
-        const dir = path.dirname(RESULT_FILE);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
+        ensureDirectoryExists(RESULT_FILE);
         fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
         return emptyData;
       } catch (fallbackError) {
-        console.error('Fallback also failed:', fallbackError);
+        console.error('❌ Fallback also failed:', fallbackError);
         throw new Error('Cannot create result file in any location');
       }
     }
@@ -142,15 +159,18 @@ export async function GET() {
     const data = readResultFile();
     return NextResponse.json({
       ...data,
-      filePath: RESULT_FILE // Debug info
+      filePath: RESULT_FILE,
+      fileExists: fs.existsSync(RESULT_FILE),
+      canWrite: canWriteToPath(RESULT_FILE)
     });
   } catch (error) {
-    console.error('GET Error:', error);
+    console.error('❌ GET Error:', error);
     return NextResponse.json({ 
       results: [], 
       lastUpdated: null,
       error: error instanceof Error ? error.message : 'Unknown error',
-      filePath: RESULT_FILE
+      filePath: RESULT_FILE,
+      fileExists: fs.existsSync(RESULT_FILE)
     }, { status: 500 });
   }
 }
@@ -164,7 +184,7 @@ export async function POST(request: NextRequest) {
     try {
       newResult = await request.json();
     } catch (parseError) {
-      console.error('JSON Parse Error:', parseError);
+      console.error('❌ JSON Parse Error:', parseError);
       return NextResponse.json({ 
         success: false,
         error: 'invalid_json',
@@ -187,7 +207,7 @@ export async function POST(request: NextRequest) {
     try {
       existingData = readResultFile();
     } catch (readError) {
-      console.error('Read Error:', readError);
+      console.error('❌ Read Error:', readError);
       return NextResponse.json({ 
         success: false,
         error: 'file_read_error',
@@ -220,18 +240,22 @@ export async function POST(request: NextRequest) {
     
     // Ghi file
     try {
-      fs.writeFileSync(RESULT_FILE, JSON.stringify(existingData, null, 2), 'utf-8');
+      fs.writeFileSync(RESULT_FILE, JSON.stringify(existingData, null, 2), { 
+        encoding: 'utf-8',
+        mode: 0o666
+      });
       console.log(`✅ Saved result to: ${RESULT_FILE}`);
       console.log(`📊 Total results: ${existingData.results.length}`);
     } catch (writeError) {
-      console.error('Write Error:', writeError);
+      console.error('❌ Write Error:', writeError);
       
       // Thử fallback
       if (RESULT_FILE === PREFERRED_PATH) {
-        console.log('Trying fallback path for writing...');
+        console.log('🔄 Trying fallback path for writing...');
         RESULT_FILE = FALLBACK_PATH;
         
         try {
+          ensureDirectoryExists(RESULT_FILE);
           fs.writeFileSync(RESULT_FILE, JSON.stringify(existingData, null, 2), 'utf-8');
           console.log(`✅ Saved to fallback: ${RESULT_FILE}`);
         } catch (fallbackWriteError) {
@@ -267,13 +291,13 @@ export async function POST(request: NextRequest) {
     });
     
   } catch (error) {
-    console.error('POST Error:', error);
+    console.error('❌ POST Error:', error);
     return NextResponse.json({ 
       success: false,
       error: 'internal_server_error',
       message: 'Failed to save result',
       details: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : undefined) : undefined
     }, { status: 500 });
   }
 }
@@ -286,7 +310,10 @@ export async function DELETE() {
       lastUpdated: new Date().toISOString() 
     };
     
-    fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
+    fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), { 
+      encoding: 'utf-8',
+      mode: 0o666
+    });
     console.log(`🗑️ Cleared all results in: ${RESULT_FILE}`);
     
     return NextResponse.json({ 
@@ -295,7 +322,7 @@ export async function DELETE() {
       filePath: RESULT_FILE
     });
   } catch (error) {
-    console.error('DELETE Error:', error);
+    console.error('❌ DELETE Error:', error);
     return NextResponse.json({ 
       success: false,
       error: 'delete_error',
