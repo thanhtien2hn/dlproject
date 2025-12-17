@@ -5,7 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-const RESULT_FILE = path.join(process.cwd(), 'result.json');
+// ✅ Thay đổi đường dẫn lưu file vào /home/administrator/
+const RESULT_FILE = '/home/administrator/result.json';
 
 interface DetectionResult {
   id: string;
@@ -17,9 +18,13 @@ interface DetectionResult {
     class_name: string;
     confidence: number;
     bbox: number[];
+    page?: number; // Thêm support cho PDF
   }[];
   uatStatus: 'pass' | 'fail';
   uatNote: string;
+  isPDF?: boolean; // Thêm flag PDF
+  totalPages?: number; // Thêm số trang
+  pdfPages?: any[]; // Thêm thông tin các trang PDF
   timestamp: string;
 }
 
@@ -33,9 +38,17 @@ function readResultFile(): ResultFile {
   const emptyData: ResultFile = { results: [], lastUpdated: '' };
   
   try {
+    // ✅ Đảm bảo thư mục /home/administrator/ tồn tại
+    const dir = path.dirname(RESULT_FILE);
+    if (!fs.existsSync(dir)) {
+      console.log(`Creating directory: ${dir}`);
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
     // Kiểm tra file có tồn tại không
     if (!fs.existsSync(RESULT_FILE)) {
       // Tạo file mới với data rỗng
+      console.log(`Creating new file: ${RESULT_FILE}`);
       fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
       return emptyData;
     }
@@ -61,7 +74,12 @@ function readResultFile(): ResultFile {
   } catch (error) {
     console.error('Error reading result file, creating new one:', error);
     // Nếu có lỗi, tạo file mới
-    fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
+    try {
+      fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
+    } catch (writeError) {
+      console.error('Cannot write to file:', writeError);
+      throw new Error(`Cannot access ${RESULT_FILE}. Check permissions.`);
+    }
     return emptyData;
   }
 }
@@ -73,7 +91,11 @@ export async function GET() {
     return NextResponse.json(data);
   } catch (error) {
     console.error('GET Error:', error);
-    return NextResponse.json({ results: [], lastUpdated: null });
+    return NextResponse.json({ 
+      results: [], 
+      lastUpdated: null,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 }
 
@@ -107,20 +129,25 @@ export async function POST(request: NextRequest) {
     existingData.results.push(newResult);
     existingData.lastUpdated = new Date().toISOString();
     
-    // Ghi lại file
+    // Ghi lại file vào /home/administrator/result.json
     fs.writeFileSync(RESULT_FILE, JSON.stringify(existingData, null, 2), 'utf-8');
+    
+    console.log(`✅ Saved result to: ${RESULT_FILE}`);
+    console.log(`📊 Total results: ${existingData.results.length}`);
     
     return NextResponse.json({ 
       success: true, 
       message: 'Result saved successfully',
       totalResults: existingData.results.length,
-      savedResult: newResult
+      savedResult: newResult,
+      filePath: RESULT_FILE // Trả về đường dẫn file để debug
     });
   } catch (error) {
     console.error('POST Error:', error);
     return NextResponse.json({ 
       error: 'Failed to save result',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: error instanceof Error ? error.message : 'Unknown error',
+      filePath: RESULT_FILE
     }, { status: 500 });
   }
 }
@@ -131,12 +158,18 @@ export async function DELETE() {
     const emptyData: ResultFile = { results: [], lastUpdated: new Date().toISOString() };
     fs.writeFileSync(RESULT_FILE, JSON.stringify(emptyData, null, 2), 'utf-8');
     
+    console.log(`🗑️ Cleared all results in: ${RESULT_FILE}`);
+    
     return NextResponse.json({ 
       success: true, 
-      message: 'All results cleared' 
+      message: 'All results cleared',
+      filePath: RESULT_FILE
     });
   } catch (error) {
     console.error('DELETE Error:', error);
-    return NextResponse.json({ error: 'Failed to clear results' }, { status: 500 });
+    return NextResponse.json({ 
+      error: 'Failed to clear results',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
