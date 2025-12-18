@@ -315,7 +315,7 @@ function UATDashboard() {
       for (let i = 1; i <= pdf.numPages; i++) {
         console.log(`Converting page ${i}/${pdf.numPages}...`);
         const page = await pdf.getPage(i);
-        // Lấy viewport gốc để có kích thước thực
+        // ✅ CRITICAL: scale 1.0 để khớp với backend DPI=72
         const viewport = page.getViewport({ scale: 1.0 });
         
         const canvas = document.createElement('canvas');
@@ -336,7 +336,6 @@ function UATDashboard() {
         
         const imageUrl = canvas.toDataURL('image/png');
         
-        // Lưu kích thước gốc (scale 1.0) để khớp với backend
         pages.push({
           pageNumber: i,
           imageUrl: imageUrl,
@@ -344,10 +343,10 @@ function UATDashboard() {
           height: viewport.height
         });
         
-        console.log(`Page ${i} converted: ${viewport.width}x${viewport.height}px`);
+        console.log(`Page ${i} converted: ${viewport.width}x${viewport.height}px (scale 1.0)`);
       }
       
-      console.log(`All ${pages.length} pages converted`);
+      console.log(`✓ All ${pages.length} pages converted with scale 1.0`);
       return pages;
       
     } catch (err) {
@@ -397,9 +396,10 @@ function UATDashboard() {
       }
 
       try {
-        console.log('Starting PDF conversion...');
+        console.log('Starting PDF conversion with scale 1.0...');
         const pages = await convertPDFToImages(file);
         console.log('PDF conversion completed:', pages.length, 'pages');
+        console.log('First page size:', pages[0]?.width, 'x', pages[0]?.height);
         
         setPdfPages(pages);
         setTotalPages(pages.length);
@@ -407,7 +407,9 @@ function UATDashboard() {
         
         if (pages.length > 0) {
           setCurrentImage(pages[0].imageUrl);
-          setImageNaturalSize({ width: pages[0].width, height: pages[0].height });
+          const initialSize = { width: pages[0].width, height: pages[0].height };
+          setImageNaturalSize(initialSize);
+          console.log('✓ Set imageNaturalSize on upload:', initialSize);
           setImageLoaded(true);
         }
       } catch (err) {
@@ -520,6 +522,29 @@ function UATDashboard() {
       let allDetections: Detection[] = [];
       
       if (result.file_type === 'pdf' && result.pages) {
+        console.log('=== PDF DETECTION RESPONSE ===');
+        console.log('Frontend size (upload):', imageNaturalSize.width, 'x', imageNaturalSize.height);
+        console.log('Backend size (page 1):', result.pages[0]?.image_width, 'x', result.pages[0]?.image_height);
+        
+        // Kiểm tra nếu kích thước khớp
+        const backendWidth = result.pages[0]?.image_width || imageNaturalSize.width;
+        const backendHeight = result.pages[0]?.image_height || imageNaturalSize.height;
+        
+        const tolerance = 5; // cho phép sai số 5 pixel
+        const widthMatch = Math.abs(imageNaturalSize.width - backendWidth) <= tolerance;
+        const heightMatch = Math.abs(imageNaturalSize.height - backendHeight) <= tolerance;
+        
+        if (!widthMatch || !heightMatch) {
+          console.warn('⚠️ SIZE MISMATCH DETECTED!');
+          console.warn(`Frontend: ${imageNaturalSize.width}x${imageNaturalSize.height}`);
+          console.warn(`Backend: ${backendWidth}x${backendHeight}`);
+          console.warn('This will cause bounding box misalignment!');
+          
+          setError(`Cảnh báo: Kích thước không khớp! Frontend: ${imageNaturalSize.width}x${imageNaturalSize.height}, Backend: ${backendWidth}x${backendHeight}. Vui lòng kiểm tra backend DPI=72`);
+        } else {
+          console.log('✓ Size match - dimensions are consistent');
+        }
+        
         setTotalPages(result.total_pages || 1);
         result.pages.forEach((page: any) => {
           if (page.detections && Array.isArray(page.detections)) {
@@ -527,12 +552,8 @@ function UATDashboard() {
           }
         });
         
-        if (result.pages.length > 0 && result.pages[0]) {
-          setImageNaturalSize({
-            width: result.pages[0].image_width || 595,
-            height: result.pages[0].image_height || 842
-          });
-        }
+        // KHÔNG thay đổi imageNaturalSize - giữ nguyên kích thước từ upload
+        console.log('✓ Keeping original size:', imageNaturalSize);
       } else if (result.detections && Array.isArray(result.detections)) {
         allDetections = result.detections;
         setTotalPages(1);
@@ -691,18 +712,16 @@ function UATDashboard() {
     setSaveMessage(null);
 
     try {
-      // Lấy image_data từ currentImage (base64)
-      // Nếu là PDF, lấy ảnh của page đầu tiên
       let imageDataToSave = currentImage;
       if (isPDF && pdfPages.length > 0) {
-        imageDataToSave = pdfPages[0].imageUrl; // Lưu page đầu tiên làm thumbnail
+        imageDataToSave = pdfPages[0].imageUrl;
       }
 
       const saveRequest = {
         result_id: detectionResponse.result_id,
         image_name: imageName,
         file_type: isPDF ? 'pdf' : 'image',
-        image_data: imageDataToSave, // ✅ FIXED: Gửi dữ liệu ảnh thực tế
+        image_data: imageDataToSave,
         image_width: imageNaturalSize.width,
         image_height: imageNaturalSize.height,
         total_pages: totalPages,
@@ -719,11 +738,6 @@ function UATDashboard() {
         uat_status: uatStatus,
         uat_note: uatNote || null
       };
-
-      console.log('Saving to database:', { 
-        ...saveRequest, 
-        image_data: imageDataToSave.substring(0, 50) + '... (truncated)' 
-      });
 
       const response = await fetch(`${backendUrl}/save-result`, {
         method: 'POST',
@@ -818,8 +832,8 @@ function UATDashboard() {
             <ScanText className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-800">Dashboard - PostgreSQL Database</h1>
-            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 3.0 • Max {MAX_FILE_SIZE_TEXT}</p>
+            <h1 className="text-lg font-bold text-gray-800">Dashboard - Fixed PDF Scale Issue</h1>
+            <p className="text-xs text-gray-500">Document Layout Analysis • Version 3.1 • DPI Synchronized</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -884,7 +898,7 @@ function UATDashboard() {
               <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded text-sm">
                 <p className="text-green-700 truncate font-medium">✓ {imageName}</p>
                 <p className="text-green-600 text-xs mt-1">
-                  {imageNaturalSize.width} × {imageNaturalSize.height} px • {fileSize}
+                  {imageNaturalSize.width.toFixed(0)} × {imageNaturalSize.height.toFixed(0)} px • {fileSize}
                   {isPDF && <span className="ml-2 bg-red-100 text-red-700 px-1.5 rounded text-xs font-medium">PDF ({totalPages} pages)</span>}
                 </p>
               </div>
@@ -967,7 +981,6 @@ function UATDashboard() {
 
           <div className="p-5 bg-blue-50 flex-1">
             <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-4">3. Save to Database</h3>
-
 
             <div className="mb-4">
               <label className="text-xs font-medium text-gray-700 mb-2 block">Note</label>
@@ -1061,7 +1074,10 @@ function UATDashboard() {
                 {imageNaturalSize.width > 0 && (
                   <>
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                      {imageNaturalSize.width} x {imageNaturalSize.height} px
+                      {imageNaturalSize.width.toFixed(0)} x {imageNaturalSize.height.toFixed(0)} px
+                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium">
+                      Ratio: {(imageNaturalSize.width / imageNaturalSize.height).toFixed(3)}
                     </span>
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
                       {fileSize}
@@ -1089,7 +1105,7 @@ function UATDashboard() {
                   <div className="text-center">
                     <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
                     <p className="text-gray-700 font-medium">Converting PDF to images...</p>
-                    <p className="text-gray-500 text-sm mt-2">This may take a moment</p>
+                    <p className="text-gray-500 text-sm mt-2">Using scale 1.0 for consistency</p>
                   </div>
                 </div>
               )}
