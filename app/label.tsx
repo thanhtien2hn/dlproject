@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
   Upload, Download, Save, Loader2, AlertCircle, 
   ScanText, CheckCircle, XCircle, AlertTriangle,
-  BarChart2, RefreshCw, UploadCloud, Trash2, FileJson, List,
+  BarChart2, RefreshCw, UploadCloud, FileJson, List,
   ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2
 } from 'lucide-react';
 
@@ -21,13 +22,25 @@ interface BoundingBox extends Detection {
   color: string;
 }
 
-interface LabeledImage {
-  imageUrl: string;
-  imageName: string;
-  boxes: BoundingBox[];
-  imageWidth: number;
-  imageHeight: number;
-  timestamp: string;
+interface DetectionResponse {
+  success: boolean;
+  result_id: string;
+  file_type: string;
+  image_name: string;
+  detections?: Detection[];
+  pages?: Array<{
+    page_number: number;
+    detections: Detection[];
+    image_width: number;
+    image_height: number;
+  }>;
+  image_width?: number;
+  image_height?: number;
+  total_pages?: number;
+  processing_time: number;
+  model_name: string;
+  model_type: string;
+  total_detections: number;
 }
 
 interface ModelInfo {
@@ -55,7 +68,7 @@ const CLASS_COLORS: { [key: string]: string } = {
   'Logo': '#92400e',
 };
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
 const MAX_FILE_SIZE_TEXT = '100MB';
 
 const getClassColor = (className: string): string => {
@@ -69,22 +82,23 @@ const generateId = () => {
 };
 
 function UATDashboard() {
+  const router = useRouter();
+  
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [currentImageFile, setCurrentImageFile] = useState<File | null>(null);
   const [imageName, setImageName] = useState<string>('');
   const [boxes, setBoxes] = useState<BoundingBox[]>([]);
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
-  const [hoveredBoxId, setHoveredBoxId] = useState<string | null>(null); // NEW: hover state
-  const [labeledImages, setLabeledImages] = useState<LabeledImage[]>([]);
+  const [hoveredBoxId, setHoveredBoxId] = useState<string | null>(null);
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [isDetecting, setIsDetecting] = useState(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
-  const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
+  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
-  const [uatStatus, setUatStatus] = useState<'pass' | 'fail'>('pass');
+  const [uatStatus, setUatStatus] = useState<'pass' | 'fail' | 'pending'>('pending');
   const [uatNote, setUatNote] = useState('');
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [fileSize, setFileSize] = useState<string>('');
@@ -99,12 +113,18 @@ function UATDashboard() {
   const [isConvertingPDF, setIsConvertingPDF] = useState(false);
   const [pdfJsLoaded, setPdfJsLoaded] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [detectionResponse, setDetectionResponse] = useState<DetectionResponse | null>(null);
+  const [modelName, setModelName] = useState<string>('');
+  const [modelType, setModelType] = useState<string>('');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load PDF.js
+  const navigateToResults = () => {
+    router.push('/results');
+  };
+
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
@@ -130,7 +150,6 @@ function UATDashboard() {
     };
   }, []);
 
-  // Keyboard shortcuts for zoom
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -158,7 +177,6 @@ function UATDashboard() {
     return () => clearInterval(interval);
   }, [backendUrl]);
 
-  // MODIFIED: Update canvas when hoveredBoxId changes
   const drawCanvas = useCallback(() => {
     if (isPDF) {
       const currentPageData = pdfPages.find(p => p.pageNumber === currentPage);
@@ -223,7 +241,7 @@ function UATDashboard() {
 
   useEffect(() => {
     if (saveMessage) {
-      const timer = setTimeout(() => setSaveMessage(null), 3000);
+      const timer = setTimeout(() => setSaveMessage(null), 5000);
       return () => clearTimeout(timer);
     }
   }, [saveMessage]);
@@ -257,10 +275,10 @@ function UATDashboard() {
 
   const fetchSavedResultsCount = async () => {
     try {
-      const response = await fetch('/api/save-result');
+      const response = await fetch(`${backendUrl}/results?limit=1`);
       if (response.ok) {
         const data = await response.json();
-        setSavedResultsCount(data.results?.length || 0);
+        setSavedResultsCount(data.total || 0);
       }
     } catch (err) {
       console.error('Failed to fetch saved results:', err);
@@ -296,7 +314,8 @@ function UATDashboard() {
       for (let i = 1; i <= pdf.numPages; i++) {
         console.log(`Converting page ${i}/${pdf.numPages}...`);
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2.0 });
+        // Lấy viewport gốc để có kích thước thực
+        const viewport = page.getViewport({ scale: 1.0 });
         
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
@@ -316,6 +335,7 @@ function UATDashboard() {
         
         const imageUrl = canvas.toDataURL('image/png');
         
+        // Lưu kích thước gốc (scale 1.0) để khớp với backend
         pages.push({
           pageNumber: i,
           imageUrl: imageUrl,
@@ -323,7 +343,7 @@ function UATDashboard() {
           height: viewport.height
         });
         
-        console.log(`Page ${i} converted successfully`);
+        console.log(`Page ${i} converted: ${viewport.width}x${viewport.height}px`);
       }
       
       console.log(`All ${pages.length} pages converted`);
@@ -363,6 +383,7 @@ function UATDashboard() {
     setCurrentPage(1);
     setPdfPages([]);
     setZoom(1);
+    setDetectionResponse(null);
     
     setCurrentImageFile(file);
     setImageName(file.name);
@@ -487,9 +508,13 @@ function UATDashboard() {
         throw new Error(errorMessage);
       }
 
-      const result = await detectResponse.json();
+      const result: DetectionResponse = await detectResponse.json();
       const endTime = Date.now();
       setProcessingTime((endTime - startTime) / 1000);
+
+      setDetectionResponse(result);
+      setModelName(result.model_name);
+      setModelType(result.model_type);
 
       let allDetections: Detection[] = [];
       
@@ -526,6 +551,11 @@ function UATDashboard() {
       
       if (detections.length === 0) {
         setError('Không phát hiện được object nào. Thử giảm confidence threshold.');
+      } else {
+        setSaveMessage({ 
+          type: 'success', 
+          text: `✓ Phát hiện ${detections.length} objects. Nhấn Save để lưu vào database.` 
+        });
       }
     } catch (err) {
       console.error('Detection error:', err);
@@ -535,7 +565,6 @@ function UATDashboard() {
     }
   };
 
-  // MODIFIED: Enhanced drawBox with stronger hover highlight
   const drawBox = (
     ctx: CanvasRenderingContext2D, 
     box: BoundingBox, 
@@ -550,36 +579,31 @@ function UATDashboard() {
     const scaledWidth = width * scaleX;
     const scaledHeight = height * scaleY;
 
-    // Enhanced fill for highlighted box
     if (isHighlighted) {
-      ctx.fillStyle = box.color + '50'; // More opaque background when highlighted
+      ctx.fillStyle = box.color + '50';
       ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
       
-      // Add glow effect
       ctx.shadowColor = box.color;
       ctx.shadowBlur = 20;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
     } else {
-      ctx.fillStyle = box.color + '1A'; // Light background when not highlighted
+      ctx.fillStyle = box.color + '1A';
       ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
       ctx.shadowBlur = 0;
     }
     
-    // Draw border
-    ctx.strokeStyle = isHighlighted ? '#ef4444' : box.color; // Red border when highlighted
-    ctx.lineWidth = isHighlighted ? 5 : 2; // Much thicker border when highlighted
+    ctx.strokeStyle = isHighlighted ? '#ef4444' : box.color;
+    ctx.lineWidth = isHighlighted ? 5 : 2;
     ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
     
-    // Reset shadow for text
     ctx.shadowBlur = 0;
 
-    // Draw label
     const labelText = `${box.class_name} ${box.confidence.toFixed(2)}`;
     ctx.font = 'bold 12px Arial';
     const textWidth = ctx.measureText(labelText).width;
 
-    ctx.fillStyle = isHighlighted ? '#ef4444' : box.color; // Red label when highlighted
+    ctx.fillStyle = isHighlighted ? '#ef4444' : box.color;
     ctx.fillRect(scaledX, scaledY, textWidth + 6, 18);
     
     ctx.fillStyle = 'white';
@@ -653,7 +677,12 @@ function UATDashboard() {
 
   const saveAnnotation = async () => {
     if (!currentImage || boxes.length === 0) {
-      setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!!!' });
+      setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!' });
+      return;
+    }
+
+    if (!detectionResponse) {
+      setSaveMessage({ type: 'error', text: 'Vui lòng chạy Detection trước khi Save!' });
       return;
     }
 
@@ -661,10 +690,21 @@ function UATDashboard() {
     setSaveMessage(null);
 
     try {
-      const resultData = {
-        imageName,
-        imageData: isPDF ? pdfPages[0]?.imageUrl : currentImage,
-        imageSize: { width: imageNaturalSize.width, height: imageNaturalSize.height },
+      // Lấy image_data từ currentImage (base64)
+      // Nếu là PDF, lấy ảnh của page đầu tiên
+      let imageDataToSave = currentImage;
+      if (isPDF && pdfPages.length > 0) {
+        imageDataToSave = pdfPages[0].imageUrl; // Lưu page đầu tiên làm thumbnail
+      }
+
+      const saveRequest = {
+        result_id: detectionResponse.result_id,
+        image_name: imageName,
+        file_type: isPDF ? 'pdf' : 'image',
+        image_data: imageDataToSave, // ✅ FIXED: Gửi dữ liệu ảnh thực tế
+        image_width: imageNaturalSize.width,
+        image_height: imageNaturalSize.height,
+        total_pages: totalPages,
         detections: boxes.map(b => ({
           class_id: b.class_id,
           class_name: b.class_name,
@@ -672,73 +712,54 @@ function UATDashboard() {
           bbox: b.bbox,
           page: b.page
         })),
-        uatStatus,
-        uatNote,
-        isPDF,
-        totalPages,
-        pdfPages: isPDF ? pdfPages.map(p => ({ pageNumber: p.pageNumber, imageUrl: p.imageUrl })) : undefined
+        processing_time: processingTime || 0,
+        model_name: modelName,
+        model_type: modelType,
+        uat_status: uatStatus,
+        uat_note: uatNote || null
       };
 
-      const response = await fetch('/api/save-result', {
+      console.log('Saving to database:', { 
+        ...saveRequest, 
+        image_data: imageDataToSave.substring(0, 50) + '... (truncated)' 
+      });
+
+      const response = await fetch(`${backendUrl}/save-result`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(resultData),
+        body: JSON.stringify(saveRequest),
       });
 
       const result = await response.json();
 
-      if (response.ok) {
+      if (response.ok && result.success) {
         setSaveMessage({ 
           type: 'success', 
-          text: `Đã lưu thành công! (Tổng: ${result.totalResults} kết quả)` 
+          text: `✓ Đã lưu thành công vào database! ID: ${result.result_id.substring(0, 20)}... (${result.saved_detections} detections)` 
         });
-        setSavedResultsCount(result.totalResults);
         
-        const annotation: LabeledImage = {
-          imageUrl: currentImage,
-          imageName: imageName,
-          boxes: boxes,
-          imageWidth: imageNaturalSize.width,
-          imageHeight: imageNaturalSize.height,
-          timestamp: new Date().toISOString(),
-        };
-        setLabeledImages([...labeledImages, annotation]);
-      } else if (response.status === 409 && result.error === 'duplicate') {
+        fetchSavedResultsCount();
+        setUatNote('');
+        setUatStatus('pending');
+        
+      } else if (response.status === 400 && result.detail?.includes('already exists')) {
         setSaveMessage({ 
           type: 'error', 
-          text: result.message || `Ảnh "${imageName}" đã được lưu trước đó!`
+          text: `⚠ Result ID đã tồn tại trong database. Vui lòng chạy Detection lại!`
         });
       } else {
-        throw new Error(result.error || 'Failed to save');
+        throw new Error(result.detail || result.message || 'Failed to save');
       }
     } catch (err) {
       console.error('Save error:', err);
       setSaveMessage({ 
         type: 'error', 
-        text: `Lỗi khi lưu: ${err instanceof Error ? err.message : 'Unknown error'}` 
+        text: `✗ Lỗi khi lưu vào database: ${err instanceof Error ? err.message : 'Unknown error'}` 
       });
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const clearAllResults = async () => {
-    if (!confirm('Bạn có chắc muốn xóa tất cả kết quả đã lưu???')) return;
-
-    try {
-      const response = await fetch('/api/save-result', {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setSavedResultsCount(0);
-        setSaveMessage({ type: 'success', text: 'Đã xóa tất cả kết quả!' });
-      }
-    } catch (err) {
-      console.error('Clear error:', err);
-      setSaveMessage({ type: 'error', text: 'Lỗi khi xóa kết quả!' });
     }
   };
 
@@ -749,6 +770,7 @@ function UATDashboard() {
     }
 
     const exportData = {
+      result_id: detectionResponse?.result_id || 'unknown',
       imageName,
       imageSize: { width: imageNaturalSize.width, height: imageNaturalSize.height },
       detections: boxes.map(b => ({
@@ -762,6 +784,9 @@ function UATDashboard() {
       uatNote,
       isPDF,
       totalPages,
+      processingTime,
+      modelName,
+      modelType,
       timestamp: new Date().toISOString()
     };
 
@@ -792,30 +817,29 @@ function UATDashboard() {
             <ScanText className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-800">Dashboard</h1>
-            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 2.2 • Max {MAX_FILE_SIZE_TEXT}</p>
+            <h1 className="text-lg font-bold text-gray-800">Dashboard - PostgreSQL Database</h1>
+            <p className="text-xs text-gray-500">Document Layout Analysis System • Version 3.0 • Max {MAX_FILE_SIZE_TEXT}</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <a 
-            href="/results"
-            rel="noopener noreferrer"
+          <button
+            onClick={navigateToResults}
             className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
           >
             <FileJson className="w-4 h-4 text-blue-600" />
             <span className="text-sm font-medium text-blue-700">
-              {savedResultsCount} Saved results
+              {savedResultsCount} DB Records
             </span>
-            <ExternalLink className="w-3 h-3 text-blue-500" />
-          </a>
+          </button>
           
           <a
-            href="/results"
+            href={`${backendUrl}/docs`}
+            target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
           >
             <List className="w-4 h-4 text-gray-600" />
-            <span className="text-sm font-medium text-gray-700">List</span>
+            <span className="text-sm font-medium text-gray-700">API Docs</span>
             <ExternalLink className="w-3 h-3 text-gray-500" />
           </a>
         </div>
@@ -941,44 +965,49 @@ function UATDashboard() {
           </div>
 
           <div className="p-5 bg-blue-50 flex-1">
-            <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-4">3. Evaluate</h3>
+            <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-4">3. Save to Database</h3>
 
-            <div className="flex gap-3 mb-4">
-            </div>
 
             <div className="mb-4">
+              <label className="text-xs font-medium text-gray-700 mb-2 block">Note</label>
               <textarea 
-                placeholder="Note (optional...)" 
+                placeholder="Enter UAT note (optional)..." 
                 className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-900 h-20 resize-none focus:ring-blue-500 focus:border-blue-500"
                 value={uatNote}
                 onChange={(e) => setUatNote(e.target.value)}
               />
             </div>
 
+            {detectionResponse && (
+              <div className="mb-3 p-2 bg-blue-100 border border-blue-200 rounded text-xs text-blue-800">
+                <strong>Result ID:</strong> {detectionResponse.result_id.substring(0, 20)}...
+              </div>
+            )}
+
             {saveMessage && (
-              <div className={`mb-3 p-2 rounded text-xs flex items-center gap-2 ${
+              <div className={`mb-3 p-2 rounded text-xs flex items-start gap-2 ${
                 saveMessage.type === 'success' 
                   ? 'bg-green-100 text-green-700 border border-green-200' 
                   : 'bg-red-100 text-red-700 border border-red-200'
               }`}>
                 {saveMessage.type === 'success' ? (
-                  <CheckCircle className="w-4 h-4" />
+                  <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 ) : (
-                  <AlertCircle className="w-4 h-4" />
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 )}
-                {saveMessage.text}
+                <span className="flex-1">{saveMessage.text}</span>
               </div>
             )}
 
             <button 
               onClick={saveAnnotation}
-              disabled={boxes.length === 0 || isSaving}
+              disabled={boxes.length === 0 || isSaving || !detectionResponse}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded-lg shadow-sm transition-all flex items-center justify-center gap-2"
             >
               {isSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving...
+                  Saving to DB...
                 </>
               ) : (
                 <>
@@ -987,13 +1016,10 @@ function UATDashboard() {
               )}
             </button>
 
-            {savedResultsCount > 0 && (
-              <button 
-                onClick={clearAllResults}
-                className="w-full mt-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2 text-sm"
-              >
-                <Trash2 className="w-3 h-3" /> Delete all ({savedResultsCount})
-              </button>
+            {!detectionResponse && boxes.length > 0 && (
+              <p className="text-xs text-red-600 mt-2 text-center">
+                ⚠ Vui lòng chạy Detection lại để có result_id
+              </p>
             )}
           </div>
         </aside>
@@ -1242,7 +1268,7 @@ function UATDashboard() {
                   disabled={boxes.length === 0}
                   className="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 font-medium flex items-center justify-center gap-1 w-full"
                 >
-                  <Download className="w-3 h-3" /> Export JSON
+                  <Download className="w-3 h-3" /> Export JSON (Backup)
                 </button>
               </div>
             </div>
