@@ -847,16 +847,7 @@ function UATDashboard() {
             </span>
           </button>
           
-          <a
-            href={`${backendUrl}/docs`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            <List className="w-4 h-4 text-gray-600" />
-            <span className="text-sm font-medium text-gray-700">API Docs</span>
-            <ExternalLink className="w-3 h-3 text-gray-500" />
-          </a>
+  
         </div>
       </header>
 
