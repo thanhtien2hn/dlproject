@@ -389,8 +389,9 @@ function AnnotationPopup({ result, detections, onClose }: AnnotationPopupProps) 
 
 // ==================== MAIN TABLE ====================
 export default function ResultsTable() {
-  const [backendUrl] = useState('http://localhost:8000');
-  
+  // const [backendUrl] = useState('http://localhost:8000');
+ 
+  const [backendUrl] = useState('http://10.0.61.96:8007');
   const [results, setResults] = useState<DBResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
