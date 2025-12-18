@@ -832,9 +832,8 @@ function UATDashboard() {
             <ScanText className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-800">Dashboard - Fixed PDF Scale Issue</h1>
-            <p className="text-xs text-gray-500">Document Layout Analysis • Version 3.1 • DPI Synchronized</p>
-          </div>
+            <h1 className="text-lg font-bold text-gray-800">Dashboard </h1>
+                     </div>
         </div>
         <div className="flex items-center gap-4">
           <button
