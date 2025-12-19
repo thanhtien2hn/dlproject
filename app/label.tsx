@@ -95,8 +95,8 @@ function UATDashboard() {
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
-  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
-  // const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
+  // const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
+  const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
   const [uatStatus, setUatStatus] = useState<'pass' | 'fail' | 'pending'>('pending');
@@ -139,7 +139,7 @@ function UATDashboard() {
       }
     };
     script.onerror = () => {
-      console.error('Failed to load PDF.js');
+      console.error('Failed to load PDF.js!');
       setError('Không thể load PDF.js library');
     };
     document.body.appendChild(script);
