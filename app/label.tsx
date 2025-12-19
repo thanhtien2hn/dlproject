@@ -95,8 +95,8 @@ function UATDashboard() {
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
-  // const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
-  const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
+  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
+  // const [backendUrl, setBackendUrl] = useState('http://10.0.61.96:8007');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
   const [uatStatus, setUatStatus] = useState<'pass' | 'fail' | 'pending'>('pending');
@@ -540,7 +540,7 @@ function UATDashboard() {
           console.warn(`Backend: ${backendWidth}x${backendHeight}`);
           console.warn('This will cause bounding box misalignment!');
           
-          setError(`Cảnh báo: Kích thước không khớp! Frontend: ${imageNaturalSize.width}x${imageNaturalSize.height}, Backend: ${backendWidth}x${backendHeight}. Vui lòng kiểm tra backend DPI=72`);
+          // setError(`Cảnh báo: Kích thước không khớp! Frontend: ${imageNaturalSize.width}x${imageNaturalSize.height}, Backend: ${backendWidth}x${backendHeight}. Vui lòng kiểm tra backend DPI=72`);
         } else {
           console.log('✓ Size match - dimensions are consistent');
         }
@@ -697,86 +697,97 @@ function UATDashboard() {
     setZoom(1);
   };
 
-  const saveAnnotation = async () => {
-    if (!currentImage || boxes.length === 0) {
-      setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!' });
-      return;
+  // Tìm hàm saveAnnotation trong file frontend của bạn và thay thế bằng version này:
+
+const saveAnnotation = async () => {
+  if (!currentImage || boxes.length === 0) {
+    setSaveMessage({ type: 'error', text: 'Không có dữ liệu để lưu!' });
+    return;
+  }
+
+  if (!detectionResponse) {
+    setSaveMessage({ type: 'error', text: 'Vui lòng chạy Detection trước khi Save!' });
+    return;
+  }
+
+  setIsSaving(true);
+  setSaveMessage(null);
+
+  try {
+    let imageDataToSave = currentImage;
+    if (isPDF && pdfPages.length > 0) {
+      imageDataToSave = pdfPages[0].imageUrl;
     }
 
-    if (!detectionResponse) {
-      setSaveMessage({ type: 'error', text: 'Vui lòng chạy Detection trước khi Save!' });
-      return;
-    }
+    const saveRequest = {
+      result_id: detectionResponse.result_id,
+      image_name: imageName,
+      file_type: isPDF ? 'pdf' : 'image',
+      image_data: imageDataToSave,
+      // ✅ FIX: Convert to INTEGER instead of float
+      image_width: Math.round(imageNaturalSize.width),
+      image_height: Math.round(imageNaturalSize.height),
+      total_pages: totalPages,
+      detections: boxes.map(b => ({
+        class_id: b.class_id,
+        class_name: b.class_name,
+        confidence: b.confidence,
+        bbox: b.bbox,
+        page: b.page || null
+      })),
+      processing_time: processingTime || 0,
+      model_name: modelName || 'Unknown',
+      model_type: modelType || 'unknown',
+      uat_status: uatStatus,
+      uat_note: uatNote || null
+    };
 
-    setIsSaving(true);
-    setSaveMessage(null);
+    // ✅ Debug log
+    console.log('=== SAVE REQUEST ===');
+    console.log('Result ID:', saveRequest.result_id);
+    console.log('Image dimensions:', saveRequest.image_width, 'x', saveRequest.image_height);
+    console.log('Type check:', typeof saveRequest.image_width, typeof saveRequest.image_height);
+    console.log('Detections:', saveRequest.detections.length);
+    console.log('====================');
 
-    try {
-      let imageDataToSave = currentImage;
-      if (isPDF && pdfPages.length > 0) {
-        imageDataToSave = pdfPages[0].imageUrl;
-      }
+    const response = await fetch(`${backendUrl}/save-result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(saveRequest),
+    });
 
-      const saveRequest = {
-        result_id: detectionResponse.result_id,
-        image_name: imageName,
-        file_type: isPDF ? 'pdf' : 'image',
-        image_data: imageDataToSave,
-        image_width: imageNaturalSize.width,
-        image_height: imageNaturalSize.height,
-        total_pages: totalPages,
-        detections: boxes.map(b => ({
-          class_id: b.class_id,
-          class_name: b.class_name,
-          confidence: b.confidence,
-          bbox: b.bbox,
-          page: b.page
-        })),
-        processing_time: processingTime || 0,
-        model_name: modelName,
-        model_type: modelType,
-        uat_status: uatStatus,
-        uat_note: uatNote || null
-      };
+    const result = await response.json();
 
-      const response = await fetch(`${backendUrl}/save-result`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(saveRequest),
+    if (response.ok && result.success) {
+      setSaveMessage({ 
+        type: 'success', 
+        text: `✓ Đã lưu thành công vào database! ID: ${result.result_id.substring(0, 20)}... (${result.saved_detections} detections)` 
       });
-
-      const result = await response.json();
-
-      if (response.ok && result.success) {
-        setSaveMessage({ 
-          type: 'success', 
-          text: `✓ Đã lưu thành công vào database! ID: ${result.result_id.substring(0, 20)}... (${result.saved_detections} detections)` 
-        });
-        
-        fetchSavedResultsCount();
-        setUatNote('');
-        setUatStatus('pending');
-        
-      } else if (response.status === 400 && result.detail?.includes('already exists')) {
-        setSaveMessage({ 
-          type: 'error', 
-          text: `⚠ Result ID đã tồn tại trong database. Vui lòng chạy Detection lại!`
-        });
-      } else {
-        throw new Error(result.detail || result.message || 'Failed to save');
-      }
-    } catch (err) {
-      console.error('Save error:', err);
+      
+      fetchSavedResultsCount();
+      setUatNote('');
+      setUatStatus('pending');
+      
+    } else if (response.status === 400 && result.detail?.includes('already exists')) {
       setSaveMessage({ 
         type: 'error', 
-        text: `✗ Lỗi khi lưu vào database: ${err instanceof Error ? err.message : 'Unknown error'}` 
+        text: `⚠ Result ID đã tồn tại trong database. Vui lòng chạy Detection lại!`
       });
-    } finally {
-      setIsSaving(false);
+    } else {
+      throw new Error(result.detail || result.message || 'Failed to save');
     }
-  };
+  } catch (err) {
+    console.error('Save error:', err);
+    setSaveMessage({ 
+      type: 'error', 
+      text: `✗ Lỗi khi lưu vào database: ${err instanceof Error ? err.message : 'Unknown error'}` 
+    });
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   const exportJSON = () => {
     if (boxes.length === 0) {
